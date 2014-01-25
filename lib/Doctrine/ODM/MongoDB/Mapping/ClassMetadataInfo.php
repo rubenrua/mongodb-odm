@@ -1626,6 +1626,16 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     }
 
     /**
+     * Checks whether the mapped class uses an Id generator.
+     *
+     * @return boolean TRUE if the mapped class uses an Id generator, FALSE otherwise.
+     */
+    public function usesIdGenerator()
+    {
+        return $this->generatorType != self::GENERATOR_TYPE_NONE;
+    }
+
+    /**
      * Sets the version field mapping used for versioning. Sets the default
      * value to use depending on the column type.
      *

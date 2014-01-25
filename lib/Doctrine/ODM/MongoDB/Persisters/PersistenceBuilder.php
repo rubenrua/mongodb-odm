@@ -222,6 +222,7 @@ class PersistenceBuilder
             } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_MANY) {
                 // Do nothing right now
             }
+            // @ReferenceMany is handled by CollectionPersister
         }
         return $updateData;
     }
@@ -276,29 +277,14 @@ class PersistenceBuilder
                     }
                 }
 
-            // @EmbedMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_MANY && $new) {
-                foreach ($new as $key => $embeddedDoc) {
-                    if ( ! $this->uow->isScheduledForInsert($embeddedDoc)) {
-                        $update = $this->prepareUpsertData($embeddedDoc);
-                        foreach ($update as $cmd => $values) {
-                            foreach ($values as $name => $value) {
-                                $updateData[$cmd][$mapping['name'] . '.' . $key . '.' . $name] = $value;
-                            }
-                        }
-                    }
-                }
-
             // @ReferenceOne
             } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_ONE && $mapping['isOwningSide']) {
                 if (isset($new) || $mapping['nullable'] === true) {
                     $updateData['$set'][$mapping['name']] = (is_null($new) ? null : $this->prepareReferencedDocumentValue($mapping, $new));
                 }
 
-            // @ReferenceMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_MANY) {
-                // Do nothing right now
             }
+            // @EmbedMany and @ReferenceMany are handled by CollectionPersister
         }
 
         // add discriminator if the class has one
@@ -366,10 +352,8 @@ class PersistenceBuilder
 
                     case ClassMetadata::EMBED_MANY:
                     case ClassMetadata::REFERENCE_MANY:
-                        // Skip PersistentCollections already scheduled for deletion/update
-                        if ($rawValue instanceof PersistentCollection &&
-                            ($this->uow->isCollectionScheduledForDeletion($rawValue) ||
-                             $this->uow->isCollectionScheduledForUpdate($rawValue))) {
+                        // Skip PersistentCollections already scheduled for deletion
+                        if ($rawValue instanceof PersistentCollection && $this->uow->isCollectionScheduledForDeletion($rawValue)) {
                             break;
                         }
 
