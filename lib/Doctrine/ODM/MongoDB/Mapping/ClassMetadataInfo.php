@@ -1158,7 +1158,9 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
             }
         }
 
+        // @TODO: Stop storing associations in field mappings.
         $this->fieldMappings[$mapping['fieldName']] = $mapping;
+
         if (isset($mapping['association'])) {
             $this->associationMappings[$mapping['fieldName']] = $mapping;
         }
@@ -1236,6 +1238,22 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     public function addInheritedFieldMapping(array $fieldMapping)
     {
         $this->fieldMappings[$fieldMapping['fieldName']] = $fieldMapping;
+    }
+
+    /**
+     * INTERNAL:
+     * Adds an association mapping without completing/validating it.
+     * This is mainly used to add inherited association mappings to derived classes.
+     *
+     * @param array $mapping
+     *
+     * @return void
+     *
+     * @throws MappingException
+     */
+    public function addInheritedAssociationMapping(array $mapping/*, $owningClassName = null*/)
+    {
+        $this->associationMappings[$mapping['fieldName']] = $mapping;
     }
 
     /**
