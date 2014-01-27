@@ -104,19 +104,6 @@ class PersistenceBuilder
                 } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_ONE) {
                     $value = $this->prepareEmbeddedDocumentValue($mapping, $new);
 
-                // @ReferenceMany
-                } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_MANY) {
-                    $value = array();
-                    foreach ($new as $reference) {
-                        $value[] = $this->prepareReferencedDocumentValue($mapping, $reference);
-                    }
-
-                // @EmbedMany
-                } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_MANY) {
-                    $value = array();
-                    foreach ($new as $reference) {
-                        $value[] = $this->prepareEmbeddedDocumentValue($mapping, $reference);
-                    }
                 }
             }
 
