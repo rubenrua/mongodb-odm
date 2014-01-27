@@ -63,6 +63,9 @@ class XmlDriver extends FileDriver
         } elseif ($xmlRoot->getName() == 'embedded-document') {
             $class->isEmbeddedDocument = true;
         }
+        if (isset($xmlRoot['read-only'])) {
+            $class->markReadOnly();
+        }
         if (isset($xmlRoot['db'])) {
             $class->setDatabase((string) $xmlRoot['db']);
         }

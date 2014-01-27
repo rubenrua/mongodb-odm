@@ -546,6 +546,10 @@ class UnitOfWork implements PropertyChangedListener
         $this->computeScheduleInsertsChangeSets();
         $this->computeScheduleUpsertsChangeSets();
 
+        if ($class->isReadOnly) {
+            return;
+        }
+
         // Ignore uninitialized proxy objects
         if ($document instanceof Proxy && ! $document->__isInitialized__) {
             return;
@@ -863,6 +867,11 @@ class UnitOfWork implements PropertyChangedListener
         foreach ($this->identityMap as $className => $documents) {
             $class = $this->dm->getClassMetadata($className);
 
+            // Skip class if instances are read-only
+            if ($class->isReadOnly) {
+                continue;
+            }
+
             // If change tracking is explicit or happens through notification, then only compute
             // changes on document of that type that are explicitly marked for synchronization.
             switch (true) {
@@ -881,7 +890,7 @@ class UnitOfWork implements PropertyChangedListener
 
             foreach ($documentsToProcess as $document) {
                 // Ignore uninitialized proxy objects
-                if (/* $document is readOnly || */ $document instanceof Proxy && ! $document->__isInitialized__) {
+                if ($document instanceof Proxy && ! $document->__isInitialized__) {
                     continue;
                 }
 

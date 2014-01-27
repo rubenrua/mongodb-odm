@@ -117,6 +117,9 @@ class AnnotationDriver extends AbstractAnnotationDriver
         } elseif ($documentAnnot instanceof ODM\EmbeddedDocument) {
             $class->isEmbeddedDocument = true;
         }
+        if (isset($documentAnnot->readOnly) && $documentAnnot->readOnly) {
+            $class->markReadOnly();
+        }
         if (isset($documentAnnot->db)) {
             $class->setDatabase($documentAnnot->db);
         }

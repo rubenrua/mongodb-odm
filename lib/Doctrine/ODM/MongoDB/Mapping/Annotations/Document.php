@@ -28,4 +28,5 @@ final class Document extends AbstractDocument
     public $indexes = array();
     public $requireIndexes = false;
     public $slaveOkay;
+    public $readOnly = false;
 }

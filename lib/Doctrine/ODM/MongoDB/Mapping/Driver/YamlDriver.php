@@ -70,6 +70,9 @@ class YamlDriver extends FileDriver
         } elseif ($element['type'] === 'embeddedDocument') {
             $class->isEmbeddedDocument = true;
         }
+        if (isset($element['readOnly']) && $element['readOnly'] == true) {
+            $class->markReadOnly();
+        }
         if (isset($element['indexes'])) {
             foreach($element['indexes'] as $index) {
                 $class->addIndex($index['keys'], isset($index['options']) ? $index['options'] : array());

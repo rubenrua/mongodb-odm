@@ -405,6 +405,16 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     public $reflClass;
 
     /**
+     * Is this document marked as "read-only"?
+     *
+     * That means it is never considered for change-tracking in the UnitOfWork. It is a very helpful performance
+     * optimization for documents that are immutable.
+     *
+     * @var bool
+     */
+    public $isReadOnly = false;
+
+    /**
      * Initializes a new ClassMetadata instance that will hold the object-document mapping
      * metadata of the class with the given name.
      *
@@ -1688,6 +1698,16 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     public function setVersionField($versionField)
     {
         $this->versionField = $versionField;
+    }
+
+    /**
+     * Marks this class as read only, no change tracking is applied to it.
+     *
+     * @return void
+     */
+    public function markReadOnly()
+    {
+        $this->isReadOnly = true;
     }
 
     /**

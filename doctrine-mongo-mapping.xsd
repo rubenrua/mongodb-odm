@@ -24,6 +24,7 @@
 
   <xs:complexType name="embedded-document">
     <xs:attribute name="name" type="xs:NMTOKEN" />
+    <xs:attribute name="read-only" type="xs:boolean" default="false" />
   </xs:complexType>
 
   <xs:complexType name="mapped-superclass">
@@ -50,6 +51,7 @@
     <xs:attribute name="change-tracking-policy" type="odm:change-tracking-policy" />
     <xs:attribute name="require-indexes" type="xs:boolean" />
     <xs:attribute name="slave-okay" type="xs:boolean" />
+    <xs:attribute name="read-only" type="xs:boolean" default="false" />
   </xs:complexType>
 
   <xs:complexType name="field">
