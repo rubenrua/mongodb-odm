@@ -123,7 +123,7 @@ class LockTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
         $this->dm->persist($user);
         $this->dm->flush();
 
-        $this->setExpectedException('Doctrine\ODM\MongoDB\LockException', 'Document Documents\User is not versioned.');
+        $this->setExpectedException('Doctrine\ODM\MongoDB\OptimisticLockException', 'Cannot obtain optimistic lock on unversioned document Documents\User');
 
         $this->dm->lock($user, LockMode::OPTIMISTIC);
     }
@@ -132,7 +132,7 @@ class LockTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
     {
         $article = new LockInt();
 
-        $this->setExpectedException('InvalidArgumentException', 'Document is not MANAGED.');
+        $this->setExpectedException('Doctrine\ODM\MongoDB\MongoDBInvalidArgumentException');
 
         $this->dm->lock($article, LockMode::OPTIMISTIC, $article->version + 1);
     }
@@ -311,13 +311,13 @@ class LockTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
 
     public function testInvalidLockDocument()
     {
-        $this->setExpectedException('Doctrine\ODM\MongoDB\MongoDBException', 'Invalid lock field type string. Lock field must be int.');
+        $this->setExpectedException('Doctrine\ODM\MongoDB\Mapping\MappingException', 'Invalid lock field type string. Lock field must be int.');
         $this->dm->getClassMetadata(__NAMESPACE__.'\InvalidLockDocument');
     }
 
     public function testInvalidVersionDocument()
     {
-        $this->setExpectedException('Doctrine\ODM\MongoDB\MongoDBException', 'Invalid version field type string. Version field must be int or date.');
+        $this->setExpectedException('Doctrine\ODM\MongoDB\Mapping\MappingException', 'Invalid version field type string. Version field must be int or date.');
         $this->dm->getClassMetadata(__NAMESPACE__.'\InvalidVersionDocument');
     }
 }

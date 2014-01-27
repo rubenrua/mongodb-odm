@@ -20,13 +20,19 @@
 namespace Doctrine\ODM\MongoDB;
 
 /**
- * LockException
+ * Pessimistic Lock Exception
  *
- * @author Roman Borschel <roman@code-factory.org>
  * @author Benjamin Eberlei <kontakt@beberlei.de>
+ * @author Roman Borschel <roman@code-factory.org>
  * @author Jonathan H. Wage <jonwage@gmail.com>
- * @since 1.0
  */
-class LockException extends MongoDBException
+class PessimisticLockException extends LockException
 {
+    /**
+     * @return PessimisticLockException
+     */
+    public static function lockFailed()
+    {
+        return new self("The pessimistic lock failed.");
+    }
 }

@@ -269,7 +269,7 @@ class ClassMetadataFactory extends AbstractClassMetadataFactory
             case ClassMetadata::GENERATOR_TYPE_NONE;
                 break;
             default:
-                throw new MappingException("Unknown generator type: " . $class->generatorType);
+                throw MappingException::unknownIdGeneratorType($class->generatorType);
         }
     }
 

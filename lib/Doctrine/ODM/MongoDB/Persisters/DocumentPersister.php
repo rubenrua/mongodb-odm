@@ -24,7 +24,8 @@ use Doctrine\MongoDB\Cursor as BaseCursor;
 use Doctrine\ODM\MongoDB\Cursor;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Doctrine\ODM\MongoDB\Hydrator\HydratorFactory;
-use Doctrine\ODM\MongoDB\LockException;
+use Doctrine\ODM\MongoDB\OptimisticLockException;
+use Doctrine\ODM\MongoDB\PessimisticLockException;
 use Doctrine\ODM\MongoDB\LockMode;
 use Doctrine\ODM\MongoDB\Mapping\ClassMetadata;
 use Doctrine\ODM\MongoDB\PersistentCollection;
@@ -301,7 +302,7 @@ class DocumentPersister
      *
      * @param object $document
      * @param array $options Array of options to be used with update()
-     * @throws \Doctrine\ODM\MongoDB\LockException
+     * @throws \Doctrine\ODM\MongoDB\OptimisticLockException
      */
     public function update($document, array $options = array())
     {
@@ -349,7 +350,7 @@ class DocumentPersister
             $result = $this->collection->update($query, $update, $options);
 
             if (($this->class->isVersioned || $this->class->isLockable) && ! $result['n']) {
-                throw LockException::lockFailed($document);
+                throw OptimisticLockException::lockFailed($document);
             }
         }
     }
@@ -359,7 +360,7 @@ class DocumentPersister
      *
      * @param mixed $document
      * @param array $options Array of options to be used with remove()
-     * @throws \Doctrine\ODM\MongoDB\LockException
+     * @throws \Doctrine\ODM\MongoDB\OptimisticLockException
      */
     public function delete($document, array $options = array())
     {
@@ -374,7 +375,7 @@ class DocumentPersister
         $result = $this->collection->remove($query, $options);
 
         if (($this->class->isVersioned || $this->class->isLockable) && ! $result['n']) {
-            throw LockException::lockFailed($document);
+            throw OptimisticLockException::lockFailed($document);
         }
     }
 
@@ -403,7 +404,7 @@ class DocumentPersister
      * @param array   $hints    Hints for document creation
      * @param integer $lockMode
      * @param array   $sort     Sort array for Cursor::sort()
-     * @throws \Doctrine\ODM\MongoDB\LockException
+     * @throws \Doctrine\ODM\MongoDB\PessimisticLockException
      * @return object|null The loaded and managed document instance or null if no document was found
      * @todo Check identity map? loadById method? Try to guess whether $criteria is the id?
      */
@@ -429,7 +430,7 @@ class DocumentPersister
         if ($this->class->isLockable) {
             $lockMapping = $this->class->fieldMappings[$this->class->lockField];
             if (isset($result[$lockMapping['name']]) && $result[$lockMapping['name']] === LockMode::PESSIMISTIC_WRITE) {
-                throw LockException::lockFailed($result);
+                throw PessimisticLockException::lockFailed();
             }
         }
 

@@ -112,13 +112,13 @@ class UuidGenerator extends AbstractIdGenerator
      *
      * @param string $namespace The GUID to seed with
      * @param string $salt The string to salt this new UUID with
-     * @throws \Exception when the provided namespace is invalid
+     * @throws \InvalidArgumentException when the provided namespace is invalid
      * @return string
      */
     public function generateV5($namespace, $salt)
     {
         if ( ! $this->isValid($namespace)) {
-            throw new \Exception('Provided $namespace is invalid: ' . $namespace);
+            throw new \InvalidArgumentException('Provided $namespace is invalid: ' . $namespace);
         }
 
         // Get hexadecimal components of namespace

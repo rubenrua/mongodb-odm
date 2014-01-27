@@ -99,7 +99,7 @@ class DocumentRepository implements ObjectRepository, Selectable
      * @param int $lockMode
      * @param int $lockVersion
      * @throws Mapping\MappingException
-     * @throws LockException
+     * @throws OptimisticLockException
      * @return object The document.
      */
     public function find($id, $lockMode = LockMode::NONE, $lockVersion = null)
@@ -136,7 +136,7 @@ class DocumentRepository implements ObjectRepository, Selectable
 
         if ($lockMode == LockMode::OPTIMISTIC) {
             if (!$this->class->isVersioned) {
-                throw LockException::notVersioned($this->documentName);
+                throw OptimisticLockException::notVersioned($this->documentName);
             }
             $document = $this->getDocumentPersister()->load($criteria);
 

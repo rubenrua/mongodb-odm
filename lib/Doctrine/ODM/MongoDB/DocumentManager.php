@@ -384,14 +384,16 @@ class DocumentManager implements ObjectManager
      * this DocumentManager as NEW. Do not pass detached documents to the persist operation.
      *
      * @param object $document The instance to make managed and persistent.
-     * @throws \InvalidArgumentException When the given $document param is not an object
+     * @throws MongoDBInvalidArgumentException When the given $document param is not an object
      */
     public function persist($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#persist()' , $document);
         }
+
         $this->errorIfClosed();
+
         $this->unitOfWork->persist($document);
     }
 
@@ -402,14 +404,16 @@ class DocumentManager implements ObjectManager
      * or as a result of the flush operation.
      *
      * @param object $document The document instance to remove.
-     * @throws \InvalidArgumentException when the $document param is not an object
+     * @throws MongoDBInvalidArgumentException when the $document param is not an object
      */
     public function remove($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#remove()' , $document);
         }
+
         $this->errorIfClosed();
+
         $this->unitOfWork->remove($document);
     }
 
@@ -418,14 +422,16 @@ class DocumentManager implements ObjectManager
      * overriding any local changes that have not yet been persisted.
      *
      * @param object $document The document to refresh.
-     * @throws \InvalidArgumentException When the given $document param is not an object
+     * @throws MongoDBInvalidArgumentException When the given $document param is not an object
      */
     public function refresh($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#refresh()' , $document);
         }
+
         $this->errorIfClosed();
+
         $this->unitOfWork->refresh($document);
     }
 
@@ -437,13 +443,14 @@ class DocumentManager implements ObjectManager
      * reference it.
      *
      * @param object $document The document to detach.
-     * @throws \InvalidArgumentException when the $document param is not an object
+     * @throws MongoDBInvalidArgumentException when the $document param is not an object
      */
     public function detach($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#detach()' , $document);
         }
+
         $this->unitOfWork->detach($document);
     }
 
@@ -454,15 +461,17 @@ class DocumentManager implements ObjectManager
      *
      * @param object $document The detached document to merge into the persistence context.
      * @throws LockException
-     * @throws \InvalidArgumentException if the $document param is not an object
+     * @throws MongoDBInvalidArgumentException if the $document param is not an object
      * @return object The managed copy of the document.
      */
     public function merge($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#merge()' , $document);
         }
+
         $this->errorIfClosed();
+
         return $this->unitOfWork->merge($document);
     }
 
@@ -472,13 +481,14 @@ class DocumentManager implements ObjectManager
      * @param object $document
      * @param int $lockMode
      * @param int $lockVersion
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      */
     public function lock($document, $lockMode, $lockVersion = null)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#lock()' , $document);
         }
+
         $this->unitOfWork->lock($document, $lockMode, $lockVersion);
     }
 
@@ -486,13 +496,14 @@ class DocumentManager implements ObjectManager
      * Releases a lock on the given document.
      *
      * @param object $document
-     * @throws \InvalidArgumentException if the $document param is not an object
+     * @throws MongoDBInvalidArgumentException if the $document param is not an object
      */
     public function unlock($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#unlock()' , $document);
         }
+
         $this->unitOfWork->unlock($document);
     }
 
@@ -531,14 +542,13 @@ class DocumentManager implements ObjectManager
      *
      * @param object $document
      * @param array $options Array of options to be used with batchInsert(), update() and remove()
-     * @throws \InvalidArgumentException
+     * @throws \Doctrine\ODM\MongoDB\OptimisticLockException If a version check on a document that
+     *         makes use of optimistic locking fails.
      */
     public function flush($document = null, array $options = array())
     {
-        if (null !== $document && ! is_object($document) && ! is_array($document)) {
-            throw new \InvalidArgumentException(gettype($document));
-        }
         $this->errorIfClosed();
+
         $this->unitOfWork->commit($document, $options);
     }
 
@@ -647,14 +657,15 @@ class DocumentManager implements ObjectManager
      * Determines whether a document instance is managed in this DocumentManager.
      *
      * @param object $document
-     * @throws \InvalidArgumentException When the $document param is not an object
+     * @throws MongoDBInvalidArgumentException When the $document param is not an object
      * @return boolean TRUE if this DocumentManager currently manages the given document, FALSE otherwise.
      */
     public function contains($document)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException(gettype($document));
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#contains()' , $document);
         }
+
         return $this->unitOfWork->isScheduledForInsert($document) ||
             $this->unitOfWork->isInIdentityMap($document) &&
             ! $this->unitOfWork->isScheduledForDelete($document);
@@ -676,22 +687,20 @@ class DocumentManager implements ObjectManager
      * @param mixed $document A document object
      * @param array $referenceMapping Mapping for the field the references the document
      *
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      * @return array A DBRef array
      */
     public function createDBRef($document, array $referenceMapping = null)
     {
         if ( ! is_object($document)) {
-            throw new \InvalidArgumentException('Cannot create a DBRef, the document is not an object');
+            throw MongoDBInvalidArgumentException::invalidObject('DocumentManager#createDBRef()' , $document);
         }
 
         $class = $this->getClassMetadata(get_class($document));
         $id = $this->unitOfWork->getDocumentIdentifier($document);
 
-        if (!$id) {
-            throw new \RuntimeException(
-                sprintf('Cannot create a DBRef without an identifier. UnitOfWork::getDocumentIdentifier() did not return an identifier for class %s', $class->name)
-            );
+        if ( ! $id) {
+            throw MongoDBInvalidArgumentException::cannotCreateDocumentDBRef($document);
         }
 
         if ( ! empty($referenceMapping['simple'])) {

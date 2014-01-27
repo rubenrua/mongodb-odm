@@ -19,7 +19,6 @@
 
 namespace Doctrine\ODM\MongoDB\Mapping;
 
-use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\Mapping\MappingException;
 use Doctrine\ODM\MongoDB\Proxy\Proxy;
 use Doctrine\ODM\MongoDB\Types\Type;
@@ -1668,12 +1667,12 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
      * value to use depending on the column type.
      *
      * @param array $mapping   The version field mapping array
-     * @throws \Doctrine\ODM\MongoDB\LockException
+     * @throws \Doctrine\ODM\MongoDB\MappingException
      */
     public function setVersionMapping(array &$mapping)
     {
         if ($mapping['type'] !== 'int' && $mapping['type'] !== 'date') {
-            throw LockException::invalidVersionFieldType($mapping['type']);
+            throw MappingException::invalidVersionFieldType($mapping['type']);
         }
         $this->isVersioned = true;
         $this->versionField = $mapping['fieldName'];
@@ -1715,11 +1714,12 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
      * value to use depending on the column type.
      *
      * @param array $mapping   The version field mapping array
+     * @throws \Doctrine\ODM\MongoDB\MappingException
      */
     public function setLockMapping(array &$mapping)
     {
         if ($mapping['type'] !== 'int') {
-            throw LockException::invalidLockFieldType($mapping['type']);
+            throw MappingException::invalidLockFieldType($mapping['type']);
         }
         $this->isLockable = true;
         $this->lockField = $mapping['fieldName'];

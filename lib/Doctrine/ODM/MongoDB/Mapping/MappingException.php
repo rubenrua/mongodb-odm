@@ -151,4 +151,19 @@ class MappingException extends BaseMappingException
     {
         return new self("Cascade on $className::$fieldName is not allowed.");
     }
+
+    public static function invalidLockFieldType($type)
+    {
+        return new self('Invalid lock field type '.$type.'. Lock field must be int.');
+    }
+
+    public static function invalidVersionFieldType($type)
+    {
+        return new self('Invalid version field type '.$type.'. Version field must be int or date.');
+    }
+
+    public static function unknownIdGeneratorType($type)
+    {
+        return new self("Unknown generator type: " . $type);
+    }
 }

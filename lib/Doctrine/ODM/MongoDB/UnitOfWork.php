@@ -524,7 +524,7 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @param  object $document
      *
-     * @throws \InvalidArgumentException If the document is not STATE_MANAGED
+     * @throws MongoDBInvalidArgumentException If the document is not STATE_MANAGED
      *
      * @return void
      */
@@ -533,7 +533,7 @@ class UnitOfWork implements PropertyChangedListener
         $state = $this->getDocumentState($document);
 
         if ($state !== self::STATE_MANAGED && $state !== self::STATE_REMOVED) {
-            throw new \InvalidArgumentException("Document has to be managed or scheduled for removal for single computation " . self::objToStr($document));
+            throw MongoDBInvalidArgumentException::invalidSingleDocumentFlush($document);
         }
 
         $class = $this->dm->getClassMetadata(get_class($document));
@@ -915,7 +915,7 @@ class UnitOfWork implements PropertyChangedListener
      * @param array $assoc  The association mapping.
      * @param mixed $value  The value of the association.
      *
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      *
      * @return void
      */
@@ -966,10 +966,7 @@ class UnitOfWork implements PropertyChangedListener
             switch ($state) {
                 case self::STATE_NEW:
                     if ( ! $assoc['isCascadePersist']) {
-                        throw new \InvalidArgumentException("A new document was found through a relationship that was not"
-                            . " configured to cascade persist operations: " . self::objToStr($entry) . "."
-                            . " Explicitly persist the new document or configure cascading persist operations"
-                            . " on the relationship.");
+                        throw MongoDBInvalidArgumentException::newDocumentFoundThroughRelationship($assoc, $entry);
                     }
 
                     $this->persistNew($targetClass, $entry);
@@ -994,8 +991,7 @@ class UnitOfWork implements PropertyChangedListener
 
                 case self::STATE_DETACHED:
                     // Can actually not happen right now as we assume STATE_NEW.
-                    throw new \InvalidArgumentException("A detached document was found through a "
-                        . "relationship during cascading a persist operation.");
+                    throw MongoDBInvalidArgumentException::detachedDocumentFoundThroughRelationship($assoc, $entry);
                     break;
 
                 default:
@@ -1018,14 +1014,14 @@ class UnitOfWork implements PropertyChangedListener
      * @ignore
      * @param ClassMetadata $class The class descriptor of the document.
      * @param object $document The document for which to (re)calculate the change set.
-     * @throws \InvalidArgumentException If the passed document is not MANAGED.
+     * @throws MongoDBInvalidArgumentException If the passed document is not MANAGED.
      */
     public function recomputeSingleDocumentChangeSet(ClassMetadata $class, $document)
     {
         $oid = spl_object_hash($document);
 
         if ( ! isset($this->documentStates[$oid]) || $this->documentStates[$oid] != self::STATE_MANAGED) {
-            throw new \InvalidArgumentException('Document must be managed.');
+            throw MongoDBInvalidArgumentException::documentNotManaged($document);
         }
 
         if ( ! $class->isInheritanceTypeNone()) {
@@ -1428,20 +1424,25 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @param ClassMetadata $class
      * @param object $document The document to schedule for insertion.
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      */
     public function scheduleForInsert(ClassMetadata $class, $document)
     {
         $oid = spl_object_hash($document);
 
         if (isset($this->documentUpdates[$oid])) {
-            throw new \InvalidArgumentException("Dirty document can not be scheduled for insertion.");
+            throw MongoDBInvalidArgumentException::dirtyDocumentScheduledForInsert($document);
         }
+
         if (isset($this->documentDeletions[$oid])) {
-            throw new \InvalidArgumentException("Removed document can not be scheduled for insertion.");
+            throw MongoDBInvalidArgumentException::scheduleInsertForRemovedDocument($document);
         }
-        if (isset($this->documentInsertions[$oid])) {
-            throw new \InvalidArgumentException("Document can not be scheduled for insertion twice.");
+        if (isset($this->originalDocumentData[$oid]) && ! isset($this->documentInsertions[$oid])) {
+            throw MongoDBInvalidArgumentException::scheduleInsertForManagedDocument($document);
+        }
+
+        if (isset($this->entityInsertions[$oid])) {
+            throw MongoDBInvalidArgumentException::scheduleInsertTwice($document);
         }
 
         $this->documentInsertions[$oid] = $document;
@@ -1457,20 +1458,25 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @param ClassMetadata $class
      * @param object $document The document to schedule for upsert.
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      */
     public function scheduleForUpsert(ClassMetadata $class, $document)
     {
         $oid = spl_object_hash($document);
 
         if (isset($this->documentUpdates[$oid])) {
-            throw new \InvalidArgumentException("Dirty document can not be scheduled for upsert.");
+            throw MongoDBInvalidArgumentException::dirtyDocumentScheduledForInsert($document);
         }
+
         if (isset($this->documentDeletions[$oid])) {
-            throw new \InvalidArgumentException("Removed document can not be scheduled for upsert.");
+            throw MongoDBInvalidArgumentException::scheduleInsertForRemovedDocument($document);
         }
+        if (isset($this->originalDocumentData[$oid]) && ! isset($this->documentInsertions[$oid])) {
+            throw MongoDBInvalidArgumentException::scheduleInsertForManagedDocument($document);
+        }
+
         if (isset($this->documentUpserts[$oid])) {
-            throw new \InvalidArgumentException("Document can not be scheduled for upsert twice.");
+            throw MongoDBInvalidArgumentException::scheduleUpsertTwice($document);
         }
 
         $this->documentUpserts[$oid] = $document;
@@ -1504,16 +1510,18 @@ class UnitOfWork implements PropertyChangedListener
      * Schedules a document for being updated.
      *
      * @param object $document The document to schedule for being updated.
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      */
     public function scheduleForUpdate($document)
     {
         $oid = spl_object_hash($document);
+
         if ( ! isset($this->documentIdentifiers[$oid])) {
-            throw new \InvalidArgumentException("Document has no identity.");
+            throw MongoDBInvalidArgumentException::documentHasNoIdentity($document, "scheduling for update");
         }
+
         if (isset($this->documentDeletions[$oid])) {
-            throw new \InvalidArgumentException("Document is removed.");
+            throw MongoDBInvalidArgumentException::documentIsRemoved($document, "schedule for update");
         }
 
         if ( ! isset($this->documentUpdates[$oid]) && ! isset($this->documentInsertions[$oid]) && ! isset($this->documentUpserts[$oid])) {
@@ -1732,7 +1740,7 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @ignore
      * @param object $document
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      * @return boolean
      */
     public function removeFromIdentityMap($document)
@@ -1775,7 +1783,7 @@ class UnitOfWork implements PropertyChangedListener
     public function getById($id, ClassMetadata $class)
     {
         if ( ! $class->identifier) {
-            throw new \InvalidArgumentException(sprintf('Class "%s" does not have an identifier', $class->name));
+            throw MongoDBInvalidArgumentException::noIdentifier($class->name);
         }
 
         $serializedId = serialize($class->getDatabaseIdentifierValue($id));
@@ -1797,7 +1805,7 @@ class UnitOfWork implements PropertyChangedListener
     public function tryGetById($id, ClassMetadata $class)
     {
         if ( ! $class->identifier) {
-            throw new \InvalidArgumentException(sprintf('Class "%s" does not have an identifier', $class->name));
+            throw MongoDBInvalidArgumentException::noIdentifier($class->name);
         }
 
         $serializedId = serialize($class->getDatabaseIdentifierValue($id));
@@ -1883,7 +1891,7 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @param object $document The document to persist.
      * @param array $visited The already visited documents.
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      * @throws MongoDBException
      */
     private function doPersist($document, array &$visited)
@@ -1920,11 +1928,11 @@ class UnitOfWork implements PropertyChangedListener
                 break;
 
             case self::STATE_DETACHED:
-                throw new \InvalidArgumentException("Behavior of persist() for a detached document is not yet defined.");
+                 throw ORMInvalidArgumentException::detachedDocumentCannot($document, "persisted");
                 break;
 
             default:
-                throw MongoDBException::invalidDocumentState($documentState);
+                throw new \UnexpectedValueException("Unexpected document state: $documentState." . self::objToStr($document));
         }
 
         $this->cascadePersist($document, $visited);
@@ -2015,7 +2023,7 @@ class UnitOfWork implements PropertyChangedListener
      * @return object The managed copy of the document.
      *
      * @throws InvalidArgumentException If the document instance is NEW.
-     * @throws LockException            If the document uses optimistic locking through a
+     * @throws OptimisticLockException  If the document uses optimistic locking through a
      *                                  version attribute and the version check against the
      *                                  managed copy fails.
      */
@@ -2056,7 +2064,7 @@ class UnitOfWork implements PropertyChangedListener
                 if ($managedCopy) {
                     // We have the document in memory already, just make sure it is not removed.
                     if ($this->getDocumentState($managedCopy) === self::STATE_REMOVED) {
-                        throw new \InvalidArgumentException('Removed document detected during merge. Cannot merge with a removed entity.');
+                        throw MongoDBInvalidArgumentException::documentIsRemoved($managedCopy, "merge");
                     }
                 } else {
                     // We need to fetch the managed copy in order to merge.
@@ -2081,7 +2089,7 @@ class UnitOfWork implements PropertyChangedListener
 
                 // Throw exception if versions don't match
                 if ($managedCopyVersion != $documentVersion) {
-                    throw LockException::lockFailedVersionMissmatch($document, $documentVersion, $managedCopyVersion);
+                    throw OptimisticLockException::lockFailedVersionMismatch($document, $documentVersion, $managedCopyVersion);
                 }
             }
 
@@ -2243,7 +2251,7 @@ class UnitOfWork implements PropertyChangedListener
      * any local, unpersisted changes.
      *
      * @param object $document The document to refresh.
-     * @throws \InvalidArgumentException If the document is not MANAGED.
+     * @throws MongoDBInvalidArgumentException If the document is not MANAGED.
      */
     public function refresh($document)
     {
@@ -2256,7 +2264,7 @@ class UnitOfWork implements PropertyChangedListener
      *
      * @param object $document The document to refresh.
      * @param array $visited The already visited documents during cascades.
-     * @throws \InvalidArgumentException If the document is not MANAGED.
+     * @throws MongoDBInvalidArgumentException If the document is not MANAGED.
      */
     private function doRefresh($document, array &$visited)
     {
@@ -2275,7 +2283,7 @@ class UnitOfWork implements PropertyChangedListener
                 $id = $class->getDatabaseIdentifierValue($this->documentIdentifiers[$oid]);
                 $this->getDocumentPersister($class->name)->refresh($id, $document);
             } else {
-                throw new \InvalidArgumentException("Document is not MANAGED.");
+                throw MongoDBInvalidArgumentException::documentNotManaged($document);
             }
         }
 
@@ -2452,13 +2460,13 @@ class UnitOfWork implements PropertyChangedListener
      * @param object $document
      * @param int $lockMode
      * @param int $lockVersion
-     * @throws LockException
-     * @throws \InvalidArgumentException
+     * @throws OptimisticLockException
+     * @throws MongoDBInvalidArgumentException
      */
     public function lock($document, $lockMode, $lockVersion = null)
     {
         if ($this->getDocumentState($document) != self::STATE_MANAGED) {
-            throw new \InvalidArgumentException("Document is not MANAGED.");
+            throw MongoDBInvalidArgumentException::documentNotManaged($document);
         }
 
         $documentName = get_class($document);
@@ -2466,13 +2474,13 @@ class UnitOfWork implements PropertyChangedListener
 
         if ($lockMode == LockMode::OPTIMISTIC) {
             if ( ! $class->isVersioned) {
-                throw LockException::notVersioned($documentName);
+                throw OptimisticLockException::notVersioned($documentName);
             }
 
             if ($lockVersion != null) {
                 $documentVersion = $class->reflFields[$class->versionField]->getValue($document);
                 if ($documentVersion != $lockVersion) {
-                    throw LockException::lockFailedVersionMissmatch($document, $lockVersion, $documentVersion);
+                    throw OptimisticLockException::lockFailedVersionMismatch($document, $lockVersion, $documentVersion);
                 }
             }
         } elseif (in_array($lockMode, array(LockMode::PESSIMISTIC_READ, LockMode::PESSIMISTIC_WRITE))) {
@@ -2484,13 +2492,14 @@ class UnitOfWork implements PropertyChangedListener
      * Releases a lock on the given document.
      *
      * @param object $document
-     * @throws \InvalidArgumentException
+     * @throws MongoDBInvalidArgumentException
      */
     public function unlock($document)
     {
         if ($this->getDocumentState($document) != self::STATE_MANAGED) {
-            throw new \InvalidArgumentException("Document is not MANAGED.");
+            throw MongoDBInvalidArgumentException::documentNotManaged($document);
         }
+
         $documentName = get_class($document);
         $this->getDocumentPersister($documentName)->unlock($document);
     }
