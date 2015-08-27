@@ -127,8 +127,9 @@ The ``Comment`` class will need to have a custom repository class configured:
     }
 
 Lastly, the ``CommentRepository`` class will need a ``findSomeComments()``
-method. When this method is called to populate the reference, Doctrine will
-provide the Blogpost instance (i.e. owning document) as the first argument:
+method which shall return ``Doctrine\MongoDB\CursorInterface``. When this method
+is called to populate the reference, Doctrine will provide the Blogpost instance
+(i.e. owning document) as the first argument:
 
 .. code-block:: php
 
@@ -141,7 +142,9 @@ provide the Blogpost instance (i.e. owning document) as the first argument:
          */
         public function findSomeComments(BlogPost $blogPost)
         {
-            return $this->findBy(array(/* ... */));
+            return $this->createQueryBuilder()
+                ->field('blogPost')->references($blogPost);
+                ->getQuery()->execute();
         }
     }
 

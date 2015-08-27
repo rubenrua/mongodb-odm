@@ -21,6 +21,7 @@ namespace Doctrine\ODM\MongoDB;
 
 use Doctrine\Common\Collections\Collection as BaseCollection;
 use Doctrine\ODM\MongoDB\Mapping\ClassMetadata;
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 
 /**
  * A PersistentCollection represents a collection of elements that have persistent state.
@@ -100,6 +101,11 @@ class PersistentCollection implements BaseCollection
      * @var array
      */
     private $hints = array();
+
+    /**
+     * @var ClassMetadata
+     */
+    private $typeClass;
 
     /**
      * @param BaseCollection $coll
@@ -188,7 +194,7 @@ class PersistentCollection implements BaseCollection
         // Reattach any NEW objects added through add()
         if ($newObjects) {
             foreach ($newObjects as $key => $obj) {
-                if ($this->mapping['strategy'] === 'set') {
+                if (CollectionHelper::isHash($this->mapping['strategy'])) {
                     $this->coll->set($key, $obj);
                 } else {
                     $this->coll->add($obj);
@@ -255,14 +261,28 @@ class PersistentCollection implements BaseCollection
     {
         $this->owner = $document;
         $this->mapping = $mapping;
+
+        if ( ! empty($this->mapping['targetDocument'])) {
+            $this->typeClass = $this->dm->getClassMetadata($this->mapping['targetDocument']);
+        }
     }
 
     /**
      * INTERNAL:
-     * Tells this collection to take a snapshot of its current state.
+     * Tells this collection to take a snapshot of its current state reindexing
+     * itself numerically if using save strategy that is enforcing BSON array.
+     * Reindexing is safe as snapshot is taken only after synchronizing collection
+     * with database or clearing it.
      */
     public function takeSnapshot()
     {
+        if (CollectionHelper::isList($this->mapping['strategy'])) {
+            $array = $this->coll->toArray();
+            $this->coll->clear();
+            foreach ($array as $document) {
+                $this->coll->add($document);
+            }
+        }
         $this->snapshot = $this->coll->toArray();
         $this->isDirty = false;
     }
@@ -330,13 +350,24 @@ class PersistentCollection implements BaseCollection
         return $this->owner;
     }
 
+    /**
+     * @return array
+     */
     public function getMapping()
     {
         return $this->mapping;
     }
 
+    /**
+     * @return ClassMetadata
+     * @throws MongoDBException
+     */
     public function getTypeClass()
     {
+        if (empty($this->typeClass)) {
+            throw new MongoDBException('Specifying targetDocument is required for the ClassMetadata to be obtained.');
+        }
+
         return $this->typeClass;
     }
 
@@ -484,13 +515,14 @@ class PersistentCollection implements BaseCollection
      */
     public function count()
     {
+        $count = $this->coll->count();
+
+        // If this collection is inversed and not initialized, add the count returned from the database
         if ($this->mapping['isInverseSide'] && ! $this->initialized) {
             $documentPersister = $this->uow->getDocumentPersister(get_class($this->owner));
-            $count = empty($this->mapping['repositoryMethod'])
+            $count += empty($this->mapping['repositoryMethod'])
                 ? $documentPersister->createReferenceManyInverseSideQuery($this)->count()
                 : $documentPersister->createReferenceManyWithRepositoryMethodCursor($this)->count();
-        } else {
-            $count = $this->coll->count();
         }
 
         return count($this->mongoData) + $count;
@@ -510,6 +542,13 @@ class PersistentCollection implements BaseCollection
      */
     public function add($value)
     {
+        /* Initialize the collection before calling add() so this append operation
+         * uses the appropriate key. Otherwise, we risk overwriting original data
+         * when $newObjects are re-added in a later call to initialize().
+         */
+        if (isset($this->mapping['strategy']) && CollectionHelper::isHash($this->mapping['strategy'])) {
+            $this->initialize();
+        }
         $this->coll->add($value);
         $this->changed();
         return true;
@@ -594,11 +633,20 @@ class PersistentCollection implements BaseCollection
 
         $this->mongoData = array();
         $this->coll->clear();
-        if ($this->mapping['isOwningSide']) {
-            $this->changed();
-            $this->uow->scheduleCollectionDeletion($this);
-            $this->takeSnapshot();
+
+        // Nothing to do for inverse-side collections
+        if ( ! $this->mapping['isOwningSide']) {
+            return;
         }
+
+        // Nothing to do if the collection was initialized but contained no data
+        if ($this->initialized && empty($this->snapshot)) {
+            return;
+        }
+
+        $this->changed();
+        $this->uow->scheduleCollectionDeletion($this);
+        $this->takeSnapshot();
     }
 
     /**

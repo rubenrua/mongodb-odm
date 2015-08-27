@@ -21,6 +21,7 @@ namespace Doctrine\ODM\MongoDB\Mapping\Driver;
 
 use Doctrine\Common\Persistence\Mapping\ClassMetadata;
 use Doctrine\Common\Persistence\Mapping\Driver\FileDriver;
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 use Doctrine\ODM\MongoDB\Mapping\ClassMetadataInfo;
 
 /**
@@ -70,7 +71,19 @@ class XmlDriver extends FileDriver
             $class->setDatabase((string) $xmlRoot['db']);
         }
         if (isset($xmlRoot['collection'])) {
-            $class->setCollection((string) $xmlRoot['collection']);
+            if (isset($xmlRoot['capped-collection'])) {
+                $config = array('name' => (string) $xmlRoot['collection']);
+                $config['capped'] = (bool) $xmlRoot['capped-collection'];
+                if (isset($xmlRoot['capped-collection-max'])) {
+                    $config['max'] = (int) $xmlRoot['capped-collection-max'];
+                }
+                if (isset($xmlRoot['capped-collection-size'])) {
+                    $config['size'] = (int) $xmlRoot['capped-collection-size'];
+                }
+                $class->setCollection($config);
+            } else {
+                $class->setCollection((string) $xmlRoot['collection']);
+            }
         }
         if (isset($xmlRoot['inheritance-type'])) {
             $inheritanceType = (string) $xmlRoot['inheritance-type'];
@@ -95,16 +108,19 @@ class XmlDriver extends FileDriver
             }
             $class->setDiscriminatorMap($map);
         }
+        if (isset($xmlRoot->{'default-discriminator-value'})) {
+            $class->setDefaultDiscriminatorValue((string) $xmlRoot->{'default-discriminator-value'}['value']);
+        }
         if (isset($xmlRoot->{'indexes'})) {
             foreach ($xmlRoot->{'indexes'}->{'index'} as $index) {
                 $this->addIndex($class, $index);
             }
         }
-        if (isset($xmlRoot->{'require-indexes'})) {
-            $class->setRequireIndexes((boolean) $xmlRoot->{'require-indexes'});
+        if (isset($xmlRoot['require-indexes'])) {
+            $class->setRequireIndexes('true' === (string) $xmlRoot['require-indexes']);
         }
-        if (isset($xmlRoot->{'slave-okay'})) {
-            $class->setSlaveOkay((boolean) $xmlRoot->{'slave-okay'});
+        if (isset($xmlRoot['slave-okay'])) {
+            $class->setSlaveOkay('true' === (string) $xmlRoot['slave-okay']);
         }
         if (isset($xmlRoot->field)) {
             foreach ($xmlRoot->field as $field) {
@@ -114,7 +130,7 @@ class XmlDriver extends FileDriver
                     $mapping[$key] = (string) $value;
                     $booleanAttributes = array('id', 'reference', 'embed', 'unique', 'sparse', 'file', 'distance');
                     if (in_array($key, $booleanAttributes)) {
-                        $mapping[$key] = ('true' === $mapping[$key]) ? true : false;
+                        $mapping[$key] = ('true' === $mapping[$key]);
                     }
                 }
                 if (isset($mapping['id']) && $mapping['id'] === true && isset($mapping['strategy'])) {
@@ -127,14 +143,20 @@ class XmlDriver extends FileDriver
                             }
                         }
                     }
-                } 
-                
-                if (isset($attributes['not-saved'])) {
-                    $mapping['notSaved'] = ('true' === $attributes['not-saved']) ? true : false;
                 }
+
+                if (isset($attributes['not-saved'])) {
+                    $mapping['notSaved'] = ('true' === (string) $attributes['not-saved']);
+                }
+
                 if (isset($attributes['also-load'])) {
                     $mapping['alsoLoadFields'] = explode(',', $attributes['also-load']);
+                } elseif (isset($attributes['version'])) {
+                    $mapping['version'] = ('true' === (string) $attributes['version']);
+                } elseif (isset($attributes['lock'])) {
+                    $mapping['lock'] = ('true' === (string) $attributes['lock']);
                 }
+
                 $this->addFieldMapping($class, $mapping);
             }
         }
@@ -163,6 +185,11 @@ class XmlDriver extends FileDriver
                 $class->addLifecycleCallback((string) $lifecycleCallback['method'], constant('Doctrine\ODM\MongoDB\Events::' . (string) $lifecycleCallback['type']));
             }
         }
+        if (isset($xmlRoot->{'also-load-methods'})) {
+            foreach ($xmlRoot->{'also-load-methods'}->{'also-load-method'} as $alsoLoadMethod) {
+                $class->registerAlsoLoadMethod((string) $alsoLoadMethod['method'], (string) $alsoLoadMethod['field']);
+            }
+        }
     }
 
     private function addFieldMapping(ClassMetadataInfo $class, $mapping)
@@ -173,11 +200,6 @@ class XmlDriver extends FileDriver
             $name = $mapping['fieldName'];
         } else {
             throw new \InvalidArgumentException('Cannot infer a MongoDB name from the mapping');
-        }
-
-        if (isset($mapping['type']) && $mapping['type'] === 'collection') {
-            // Note: this strategy is not actually used
-            $mapping['strategy'] = isset($mapping['strategy']) ? $mapping['strategy'] : 'pushAll';
         }
 
         $class->mapField($mapping);
@@ -224,7 +246,7 @@ class XmlDriver extends FileDriver
             'embedded'       => true,
             'targetDocument' => isset($attributes['target-document']) ? (string) $attributes['target-document'] : null,
             'name'           => (string) $attributes['field'],
-            'strategy'       => isset($attributes['strategy']) ? (string) $attributes['strategy'] : 'pushAll',
+            'strategy'       => isset($attributes['strategy']) ? (string) $attributes['strategy'] : CollectionHelper::DEFAULT_STRATEGY,
         );
         if (isset($attributes['fieldName'])) {
             $mapping['fieldName'] = (string) $attributes['fieldName'];
@@ -239,8 +261,11 @@ class XmlDriver extends FileDriver
                 $mapping['discriminatorMap'][(string) $attr['value']] = (string) $attr['class'];
             }
         }
+        if (isset($embed->{'default-discriminator-value'})) {
+            $mapping['defaultDiscriminatorValue'] = (string) $embed->{'default-discriminator-value'}['value'];
+        }
         if (isset($attributes['not-saved'])) {
-            $mapping['notSaved'] = ('true' === $attributes['not-saved']) ? true : false;
+            $mapping['notSaved'] = ('true' === (string) $attributes['not-saved']);
         }
         if (isset($attributes['also-load'])) {
             $mapping['alsoLoadFields'] = explode(',', $attributes['also-load']);
@@ -257,13 +282,13 @@ class XmlDriver extends FileDriver
         $attributes = $reference->attributes();
         $mapping = array(
             'cascade'          => $cascade,
-            'orphanRemoval'    => isset($attributes['orphan-removal']) ? (boolean) $attributes['orphan-removal'] : false,
+            'orphanRemoval'    => isset($attributes['orphan-removal']) ? ('true' === (string) $attributes['orphan-removal']) : false,
             'type'             => $type,
             'reference'        => true,
-            'simple'           => isset($attributes['simple']) ? (boolean) $attributes['simple'] : false,
+            'simple'           => isset($attributes['simple']) ? ('true' === (string) $attributes['simple']) : false,
             'targetDocument'   => isset($attributes['target-document']) ? (string) $attributes['target-document'] : null,
             'name'             => (string) $attributes['field'],
-            'strategy'         => isset($attributes['strategy']) ? (string) $attributes['strategy'] : 'pushAll',
+            'strategy'         => isset($attributes['strategy']) ? (string) $attributes['strategy'] : CollectionHelper::DEFAULT_STRATEGY,
             'inversedBy'       => isset($attributes['inversed-by']) ? (string) $attributes['inversed-by'] : null,
             'mappedBy'         => isset($attributes['mapped-by']) ? (string) $attributes['mapped-by'] : null,
             'repositoryMethod' => isset($attributes['repository-method']) ? (string) $attributes['repository-method'] : null,
@@ -284,6 +309,9 @@ class XmlDriver extends FileDriver
                 $mapping['discriminatorMap'][(string) $attr['value']] = (string) $attr['class'];
             }
         }
+        if (isset($reference->{'default-discriminator-value'})) {
+            $mapping['defaultDiscriminatorValue'] = (string) $reference->{'default-discriminator-value'}['value'];
+        }
         if (isset($reference->{'sort'})) {
             foreach ($reference->{'sort'}->{'sort'} as $sort) {
                 $attr = $sort->attributes();
@@ -297,7 +325,7 @@ class XmlDriver extends FileDriver
             }
         }
         if (isset($attributes['not-saved'])) {
-            $mapping['notSaved'] = ('true' === $attributes['not-saved']) ? true : false;
+            $mapping['notSaved'] = ('true' === (string) $attributes['not-saved']);
         }
         if (isset($attributes['also-load'])) {
             $mapping['alsoLoadFields'] = explode(',', $attributes['also-load']);

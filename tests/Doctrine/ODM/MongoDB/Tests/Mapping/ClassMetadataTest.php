@@ -31,6 +31,9 @@ class ClassMetadataTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
         $cm->setFile('customFileProperty');
         $cm->setDistance('customDistanceProperty');
         $cm->setSlaveOkay(true);
+        $cm->setCollectionCapped(true);
+        $cm->setCollectionMax(1000);
+        $cm->setCollectionSize(500);
         $this->assertTrue(is_array($cm->getFieldMapping('phonenumbers')));
         $this->assertEquals(1, count($cm->fieldMappings));
         $this->assertEquals(1, count($cm->associationMappings));
@@ -56,16 +59,19 @@ class ClassMetadataTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
         $this->assertTrue($cm->slaveOkay);
         $mapping = $cm->getFieldMapping('phonenumbers');
         $this->assertEquals('Documents\Bar', $mapping['targetDocument']);
+        $this->assertTrue($cm->getCollectionCapped());
+        $this->assertEquals(1000, $cm->getCollectionMax());
+        $this->assertEquals(500, $cm->getCollectionSize());
     }
 
     public function testOwningSideAndInverseSide()
     {
         $cm = new ClassMetadataInfo('Documents\User');
-        $cm->mapManyReference(array('fieldName' => 'articles', 'inversedBy' => 'user'));
+        $cm->mapManyReference(array('fieldName' => 'articles', 'targetDocument' => 'Documents\Article', 'inversedBy' => 'user'));
         $this->assertTrue($cm->fieldMappings['articles']['isOwningSide']);
 
         $cm = new ClassMetadataInfo('Documents\Article');
-        $cm->mapOneReference(array('fieldName' => 'user', 'mappedBy' => 'articles'));
+        $cm->mapOneReference(array('fieldName' => 'user', 'targetDocument' => 'Documents\User', 'mappedBy' => 'articles'));
         $this->assertTrue($cm->fieldMappings['user']['isInverseSide']);
     }
 

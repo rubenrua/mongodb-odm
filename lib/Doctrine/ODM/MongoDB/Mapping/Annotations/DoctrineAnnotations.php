@@ -26,6 +26,7 @@ require_once __DIR__ . '/InheritanceType.php';
 require_once __DIR__ . '/DiscriminatorField.php';
 require_once __DIR__ . '/DiscriminatorMap.php';
 require_once __DIR__ . '/DiscriminatorValue.php';
+require_once __DIR__ . '/DefaultDiscriminatorValue.php';
 require_once __DIR__ . '/Indexes.php';
 require_once __DIR__ . '/AbstractIndex.php';
 require_once __DIR__ . '/Index.php';
@@ -36,10 +37,17 @@ require_once __DIR__ . '/AbstractField.php';
 require_once __DIR__ . '/Field.php';
 require_once __DIR__ . '/Id.php';
 require_once __DIR__ . '/Hash.php';
+
+// Don't import annotations whose names are reserved words in PHP7+
+if (PHP_VERSION_ID < 70000) {
+    require_once __DIR__ . '/Bool.php';
+    require_once __DIR__ . '/Int.php';
+    require_once __DIR__ . '/Float.php';
+    require_once __DIR__ . '/String.php';
+}
+
 require_once __DIR__ . '/Boolean.php';
-require_once __DIR__ . '/Int.php';
-require_once __DIR__ . '/Float.php';
-require_once __DIR__ . '/String.php';
+require_once __DIR__ . '/Integer.php';
 require_once __DIR__ . '/Date.php';
 require_once __DIR__ . '/Key.php';
 require_once __DIR__ . '/Timestamp.php';

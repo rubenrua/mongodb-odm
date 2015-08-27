@@ -21,6 +21,7 @@ namespace Doctrine\ODM\MongoDB\Query;
 
 use Doctrine\MongoDB\Collection;
 use Doctrine\MongoDB\Cursor as BaseCursor;
+use Doctrine\MongoDB\CursorInterface;
 use Doctrine\MongoDB\EagerCursor as BaseEagerCursor;
 use Doctrine\MongoDB\Iterator;
 use Doctrine\ODM\MongoDB\Cursor;
@@ -100,11 +101,21 @@ class Query extends \Doctrine\MongoDB\Query\Query
      */
     public function __construct(DocumentManager $dm, ClassMetadata $class, Collection $collection, array $query = array(), array $options = array(), $hydrate = true, $refresh = false, array $primers = array(), $requireIndexes = null)
     {
+        $primers = array_filter($primers);
+
+        if ( ! empty($primers)) {
+            $query['eagerCursor'] = true;
+        }
+
+        if ( ! empty($query['eagerCursor'])) {
+            $query['useIdentifierKeys'] = false;
+        }
+
         parent::__construct($collection, $query, $options);
         $this->dm = $dm;
         $this->class = $class;
         $this->hydrate = $hydrate;
-        $this->primers = array_filter($primers);
+        $this->primers = $primers;
         $this->requireIndexes = $requireIndexes;
 
         $this->setRefresh($refresh);
@@ -255,15 +266,14 @@ class Query extends \Doctrine\MongoDB\Query\Query
             is_array($results) && isset($results['_id'])) {
 
             $results = $uow->getOrCreateDocument($this->class->name, $results, $this->unitOfWorkHints);
-        }
 
-        if ( ! empty($this->primers)) {
-            $referencePrimer = new ReferencePrimer($this->dm, $uow);
+            if ( ! empty($this->primers)) {
+                $referencePrimer = new ReferencePrimer($this->dm, $uow);
 
-            foreach ($this->primers as $fieldName => $primer) {
-                $primer = is_callable($primer) ? $primer : null;
-                $documents = $results instanceof Iterator ? $results : array($results);
-                $referencePrimer->primeReferences($this->class, $documents, $fieldName, $this->unitOfWorkHints, $primer);
+                foreach ($this->primers as $fieldName => $primer) {
+                    $primer = is_callable($primer) ? $primer : null;
+                    $referencePrimer->primeReferences($this->class, array($results), $fieldName, $this->unitOfWorkHints, $primer);
+                }
             }
         }
 
@@ -279,27 +289,23 @@ class Query extends \Doctrine\MongoDB\Query\Query
      *
      * @see \Doctrine\MongoDB\Cursor::prepareCursor()
      * @param BaseCursor $cursor
-     * @return Cursor|EagerCursor
+     * @return CursorInterface
      */
     protected function prepareCursor(BaseCursor $cursor)
     {
         $cursor = parent::prepareCursor($cursor);
 
-        // Unwrap a base EagerCursor
-        if ($cursor instanceof BaseEagerCursor) {
-            $cursor = $cursor->getCursor();
-        }
-
         // Convert the base Cursor into an ODM Cursor
-        $cursor = new Cursor($cursor, $this->dm->getUnitOfWork(), $this->class);
-
-        // Wrap ODM Cursor with EagerCursor
-        if ( ! empty($this->query['eagerCursor'])) {
-            $cursor = new EagerCursor($cursor, $this->dm->getUnitOfWork(), $this->class);
-        }
+        $cursorClass = ( ! empty($this->query['eagerCursor'])) ? 'Doctrine\ODM\MongoDB\EagerCursor' : 'Doctrine\ODM\MongoDB\Cursor';
+        $cursor = new $cursorClass($cursor, $this->dm->getUnitOfWork(), $this->class);
 
         $cursor->hydrate($this->hydrate);
         $cursor->setHints($this->unitOfWorkHints);
+
+        if ( ! empty($this->primers)) {
+            $referencePrimer = new ReferencePrimer($this->dm, $this->dm->getUnitOfWork());
+            $cursor->enableReferencePriming($this->primers, $referencePrimer);
+        }
 
         return $cursor;
     }

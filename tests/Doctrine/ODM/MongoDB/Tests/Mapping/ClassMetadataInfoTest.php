@@ -234,6 +234,100 @@ class ClassMetadataInfoTest extends \Doctrine\ODM\MongoDB\Tests\BaseTest
             'simple' => true,
         ));
     }
+    
+    /**
+     * @expectedException \Doctrine\ODM\MongoDB\Mapping\MappingException
+     * @expectedExceptionMessage atomicSet collection strategy can be used only in top level document, used in stdClass::many
+     */
+    public function testAtomicCollectionUpdateUsageInEmbeddedDocument()
+    {
+        $cm = new ClassMetadataInfo('stdClass');
+        $cm->isEmbeddedDocument = true;
+
+        $cm->mapField(array(
+            'fieldName' => 'many',
+            'reference' => true,
+            'type' => 'many',
+            'strategy' => 'atomicSet',
+        ));
+    }
+
+    /**
+     * @dataProvider provideOwningAndInversedRefsNeedTargetDocument
+     * @expectedException \Doctrine\ODM\MongoDB\Mapping\MappingException
+     */
+    public function testOwningAndInversedRefsNeedTargetDocument($config)
+    {
+        $config = array_merge($config, array(
+            'fieldName' => 'many',
+            'reference' => true,
+            'strategy' => 'atomicSet',
+        ));
+
+        $cm = new ClassMetadataInfo('stdClass');
+        $cm->isEmbeddedDocument = true;
+        $cm->mapField($config);
+    }
+
+    public function provideOwningAndInversedRefsNeedTargetDocument()
+    {
+        return array(
+            array(array('type' => 'one', 'mappedBy' => 'post')),
+            array(array('type' => 'one', 'inversedBy' => 'post')),
+            array(array('type' => 'many', 'mappedBy' => 'post')),
+            array(array('type' => 'many', 'inversedBy' => 'post')),
+        );
+    }
+
+    public function testAddInheritedAssociationMapping()
+    {
+        $cm = new ClassMetadataInfo('stdClass');
+
+        $mapping = array(
+            'fieldName' => 'assoc',
+            'reference' => true,
+            'type' => 'one',
+            'simple' => true,
+        );
+
+        $cm->addInheritedAssociationMapping($mapping);
+
+        $expected = array(
+            'assoc' => $mapping,
+        );
+
+        $this->assertEquals($expected, $cm->associationMappings);
+    }
+
+    /**
+     * @expectedException \Doctrine\ODM\MongoDB\Mapping\MappingException
+     * @expectedExceptionMessage stdClass::id was declared an identifier and must stay this way.
+     */
+    public function testIdFieldsTypeMustNotBeOverridden()
+    {
+        $cm = new ClassMetadataInfo('stdClass');
+        $cm->setIdentifier('id');
+        $cm->mapField(array(
+            'fieldName' => 'id',
+            'type' => 'string'
+        ));
+    }
+
+    /**
+     * @expectedException \Doctrine\ODM\MongoDB\Mapping\MappingException
+     * @expectedExceptionMessage ReferenceMany's sort can not be used with addToSet and pushAll strategies, pushAll used in stdClass::ref
+     */
+    public function testReferenceManySortMustNotBeUsedWithNonSetCollectionStrategy()
+    {
+        $cm = new ClassMetadataInfo('stdClass');
+        $cm->mapField(array(
+            'fieldName' => 'ref',
+            'reference' => true,
+            'strategy' => 'pushAll',
+            'type' => 'many',
+            'sort' => array('foo' => 1)
+        ));
+    }
 }
 
 class TestCustomRepositoryClass extends DocumentRepository

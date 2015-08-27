@@ -22,11 +22,12 @@ namespace Doctrine\ODM\MongoDB;
 use Doctrine\Common\EventManager;
 use Doctrine\Common\Persistence\ObjectManager;
 use Doctrine\MongoDB\Connection;
+use Doctrine\ODM\MongoDB\Mapping\ClassMetadataInfo;
+use Doctrine\ODM\MongoDB\Mapping\MappingException;
 use Doctrine\ODM\MongoDB\Hydrator\HydratorFactory;
-use Doctrine\ODM\MongoDB\Mapping\ClassMetadata;
-use Doctrine\ODM\MongoDB\Mapping\ClassMetadataFactory;
 use Doctrine\ODM\MongoDB\Proxy\ProxyFactory;
 use Doctrine\ODM\MongoDB\Query\FilterCollection;
+use Doctrine\ODM\MongoDB\Repository\RepositoryFactory;
 
 /**
  * The DocumentManager class is the central access point for managing the
@@ -65,13 +66,6 @@ class DocumentManager implements ObjectManager
     private $metadataFactory;
 
     /**
-     * The DocumentRepository instances.
-     *
-     * @var array
-     */
-    private $repositories = array();
-
-    /**
      * The UnitOfWork used to coordinate object-level transactions.
      *
      * @var UnitOfWork
@@ -98,6 +92,13 @@ class DocumentManager implements ObjectManager
      * @var ProxyFactory
      */
     private $proxyFactory;
+
+    /**
+     * The repository factory used to create dynamic repositories.
+     *
+     * @var RepositoryFactory
+     */
+    private $repositoryFactory;
 
     /**
      * SchemaManager instance
@@ -174,6 +175,7 @@ class DocumentManager implements ObjectManager
             $this->config->getProxyNamespace(),
             $this->config->getAutoGenerateProxyClasses()
         );
+        $this->repositoryFactory = $this->config->getRepositoryFactory();
     }
 
     /**
@@ -505,24 +507,7 @@ class DocumentManager implements ObjectManager
      */
     public function getRepository($documentName)
     {
-        $documentName = ltrim($documentName, '\\');
-
-        if (isset($this->repositories[$documentName])) {
-            return $this->repositories[$documentName];
-        }
-
-        $metadata = $this->getClassMetadata($documentName);
-        $customRepositoryClassName = $metadata->customRepositoryClassName;
-
-        if ($customRepositoryClassName !== null) {
-            $repository = new $customRepositoryClassName($this, $this->unitOfWork, $metadata);
-        } else {
-            $repository = new DocumentRepository($this, $this->unitOfWork, $metadata);
-        }
-
-        $this->repositories[$documentName] = $repository;
-
-        return $repository;
+        return $this->repositoryFactory->getRepository($this, $documentName);
     }
 
     /**
@@ -690,13 +675,16 @@ class DocumentManager implements ObjectManager
         $class = $this->getClassMetadata(get_class($document));
         $id = $this->unitOfWork->getDocumentIdentifier($document);
 
-        if (!$id) {
+        if ( ! $id) {
             throw new \RuntimeException(
-                sprintf('Cannot create a DBRef without an identifier. UnitOfWork::getDocumentIdentifier() did not return an identifier for class %s', $class->name)
+                sprintf('Cannot create a DBRef for class %s without an identifier. Have you forgotten to persist/merge the document first?', $class->name)
             );
         }
 
         if ( ! empty($referenceMapping['simple'])) {
+            if ($class->inheritanceType === ClassMetadataInfo::INHERITANCE_TYPE_SINGLE_COLLECTION) {
+                throw MappingException::simpleReferenceMustNotTargetDiscriminatedDocument($referenceMapping['targetDocument']);
+            }
             return $class->getDatabaseIdentifierValue($id);
         }
 

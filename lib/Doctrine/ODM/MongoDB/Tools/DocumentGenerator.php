@@ -109,7 +109,7 @@ public function <methodName>()
  * @param <variableType>$<variableName>
  * @return self
  */
-public function <methodName>(<methodTypeHint>$<variableName>)
+public function <methodName>(<methodTypeHint>$<variableName><variableDefault>)
 {
 <spaces>$this-><fieldName> = $<variableName>;
 <spaces>return $this;
@@ -437,6 +437,20 @@ public function <methodName>()
 
     private function hasProperty($property, ClassMetadataInfo $metadata)
     {
+        if ($this->extendsClass()) {
+            // don't generate property if its already on the base class.
+            $reflClass = new \ReflectionClass($this->getClassToExtend());
+            if ($reflClass->hasProperty($property)) {
+                return true;
+            }
+        }
+        
+        foreach ($this->getTraits($metadata) as $trait) {
+            if ($trait->hasProperty($property)) {
+                return true;
+            }
+        }
+        
         return (
             isset($this->staticReflection[$metadata->name]) &&
             in_array($property, $this->staticReflection[$metadata->name]['properties'])
@@ -445,6 +459,20 @@ public function <methodName>()
 
     private function hasMethod($method, ClassMetadataInfo $metadata)
     {
+        if ($this->extendsClass()) {
+            // don't generate method if its already on the base class.
+            $reflClass = new \ReflectionClass($this->getClassToExtend());
+            if ($reflClass->hasMethod($method)) {
+                return true;
+            }
+        }
+        
+        foreach ($this->getTraits($metadata) as $trait) {
+            if ($trait->hasMethod($method)) {
+                return true;
+            }
+        }
+        
         return (
             isset($this->staticReflection[$metadata->name]) &&
             in_array($method, $this->staticReflection[$metadata->name]['methods'])
@@ -483,6 +511,25 @@ public function <methodName>()
     {
         return substr($metadata->name, 0, strrpos($metadata->name, '\\'));
     }
+    
+    /**
+     * @param ClassMetadataInfo $metadata
+     *
+     * @return array
+     */
+    protected function getTraits(ClassMetadataInfo $metadata) 
+    {
+        if (PHP_VERSION_ID >= 50400 && ($metadata->reflClass !== null || class_exists($metadata->name))) {
+            $reflClass = $metadata->reflClass === null ? new \ReflectionClass($metadata->name) : $metadata->reflClass;
+            $traits = array();
+            while ($reflClass !== false) {
+                $traits = array_merge($traits, $reflClass->getTraits());
+                $reflClass = $reflClass->getParentClass();
+            }
+            return $traits;
+        }
+        return array();
+    }
 
     private function generateDocumentImports(ClassMetadataInfo $metadata)
     {
@@ -501,7 +548,7 @@ public function <methodName>()
             $lines[] = ' *';
 
             if ($metadata->isMappedSuperclass) {
-                $lines[] = ' * @ODM\\MappedSupperClass';
+                $lines[] = ' * @ODM\\MappedSuperclass';
             } elseif ($metadata->isEmbeddedDocument) {
                 $lines[] = ' * @ODM\\EmbeddedDocument';
             } else {
@@ -552,6 +599,7 @@ public function <methodName>()
                 'generateInheritanceAnnotation',
                 'generateDiscriminatorFieldAnnotation',
                 'generateDiscriminatorMapAnnotation',
+                'generateDefaultDiscriminatorValueAnnotation',
                 'generateChangeTrackingPolicyAnnotation'
             );
 
@@ -593,6 +641,13 @@ public function <methodName>()
         }
     }
 
+    private function generateDefaultDiscriminatorValueAnnotation(ClassMetadataInfo $metadata)
+    {
+        if ($metadata->inheritanceType === ClassMetadataInfo::INHERITANCE_TYPE_SINGLE_COLLECTION && isset($metadata->defaultDiscriminatorValue)) {
+            return '@ODM\\DefaultDiscriminatorValue("' . $metadata->defaultDiscriminatorValue . '")';
+        }
+    }
+
     private function generateChangeTrackingPolicyAnnotation(ClassMetadataInfo $metadata)
     {
         return '@ODM\\ChangeTrackingPolicy("' . $this->getChangeTrackingPolicyString($metadata->changeTrackingPolicy) . '")';
@@ -620,7 +675,8 @@ public function <methodName>()
                     $methods[] = $code;
                 }
             } elseif ($fieldMapping['type'] === ClassMetadataInfo::ONE) {
-                if ($code = $this->generateDocumentStubMethod($metadata, 'set', $fieldMapping['fieldName'], isset($fieldMapping['targetDocument']) ? $fieldMapping['targetDocument'] : null)) {
+                $nullable = $this->isAssociationNullable($fieldMapping) ? 'null' : null;
+                if ($code = $this->generateDocumentStubMethod($metadata, 'set', $fieldMapping['fieldName'], isset($fieldMapping['targetDocument']) ? $fieldMapping['targetDocument'] : null, $nullable)) {
                     $methods[] = $code;
                 }
                 if ($code = $this->generateDocumentStubMethod($metadata, 'get', $fieldMapping['fieldName'], isset($fieldMapping['targetDocument']) ? $fieldMapping['targetDocument'] : null)) {
@@ -633,13 +689,23 @@ public function <methodName>()
                 if ($code = $this->generateDocumentStubMethod($metadata, 'remove', $fieldMapping['fieldName'], isset($fieldMapping['targetDocument']) ? $fieldMapping['targetDocument'] : null)) {
                     $methods[] = $code;
                 }
-                if ($code = $this->generateDocumentStubMethod($metadata, 'get', $fieldMapping['fieldName'], 'Doctrine\Common\Collections\Collection')) {
+                if ($code = $this->generateDocumentStubMethod($metadata, 'get', $fieldMapping['fieldName'], '\Doctrine\Common\Collections\Collection')) {
                     $methods[] = $code;
                 }
             }
         }
 
         return implode("\n\n", $methods);
+    }
+    
+    /**
+     * @param array $fieldMapping
+     *
+     * @return bool
+     */
+    protected function isAssociationNullable($fieldMapping)
+    {
+        return isset($fieldMapping['nullable']) && $fieldMapping['nullable'];
     }
 
     private function generateDocumentLifecycleCallbackMethods(ClassMetadataInfo $metadata)
@@ -703,7 +769,7 @@ public function <methodName>()
         return implode("\n", $lines);
     }
 
-    private function generateDocumentStubMethod(ClassMetadataInfo $metadata, $type, $fieldName, $typeHint = null)
+    private function generateDocumentStubMethod(ClassMetadataInfo $metadata, $type, $fieldName, $typeHint = null, $defaultValue = null)
     {
         // Add/remove methods should use the singular form of the field name
         $formattedFieldName = in_array($type, array('add', 'remove'))
@@ -724,12 +790,13 @@ public function <methodName>()
         $variableType = $typeHint ? $typeHint . ' ' : null;
 
         $replacements = array(
-            '<description>'    => $description,
-            '<methodTypeHint>' => $methodTypeHint,
-            '<variableType>'   => $variableType,
-            '<variableName>'   => $variableName,
-            '<methodName>'     => $methodName,
-            '<fieldName>'      => $fieldName,
+            '<description>'         => $description,
+            '<methodTypeHint>'      => $methodTypeHint,
+            '<variableType>'        => $variableType,
+            '<variableName>'        => $variableName,
+            '<methodName>'          => $methodName,
+            '<fieldName>'           => $fieldName,
+            '<variableDefault>'     => ($defaultValue !== null ) ? (' = ' . $defaultValue) : '',
         );
 
         $templateVar = sprintf('%sMethodTemplate', $type);

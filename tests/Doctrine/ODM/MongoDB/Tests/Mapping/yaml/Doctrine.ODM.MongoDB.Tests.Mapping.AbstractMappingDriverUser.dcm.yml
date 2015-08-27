@@ -5,10 +5,17 @@ Doctrine\ODM\MongoDB\Tests\Mapping\AbstractMappingDriverUser:
     fieldName: discr
   discriminatorMap:
     default: Doctrine\ODM\MongoDB\Tests\Mapping\AbstractMappingDriverUser
+  defaultDiscriminatorValue: default
   fields:
     id:
       type: id
       id: true
+    version:
+      type: int
+      version: true
+    lock:
+      type: int
+      lock: true
     name:
       type: string
       name: username
@@ -24,6 +31,8 @@ Doctrine\ODM\MongoDB\Tests\Mapping\AbstractMappingDriverUser:
       index:
         order: asc
         expireAfterSeconds: 3600
+    roles:
+      type: collection
   indexes:
     index1:
       keys:
@@ -49,6 +58,7 @@ Doctrine\ODM\MongoDB\Tests\Mapping\AbstractMappingDriverUser:
       discriminatorMap:
         home: HomePhonenumber
         work: WorkPhonenumber
+      defaultDiscriminatorValue: home
     groups:
       targetDocument: Group
       cascade: [ all ]
@@ -66,6 +76,7 @@ Doctrine\ODM\MongoDB\Tests\Mapping\AbstractMappingDriverUser:
       discriminatorMap:
         home: HomePhonenumber
         work: WorkPhonenumber
+      defaultDiscriminatorValue: home
 
   lifecycleCallbacks:
     prePersist: [ doStuffOnPrePersist, doOtherStuffOnPrePersistToo ]

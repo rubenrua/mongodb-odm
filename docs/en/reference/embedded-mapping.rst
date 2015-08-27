@@ -4,6 +4,8 @@ Embedded Mapping
 This chapter explains how embedded documents are mapped in
 Doctrine.
 
+.. _embed_one:
+
 Embed One
 ---------
 
@@ -108,6 +110,8 @@ Embed many documents:
         Phonenumber:
           type: embeddedDocument
           
+.. _embed_mixing_document_types:
+
 Mixing Document Types
 ---------------------
 
@@ -219,6 +223,54 @@ class name in each embedded document:
             discriminatorMap:
               download: DownloadTask
               build: BuildTask
+
+If you have embedded documents without a discriminator value that need to be
+treated correctly you can optionally specify a default value for the
+discriminator:
+
+.. configuration-block::
+
+    .. code-block:: php
+
+        <?php
+
+        /** @Document */
+        class User
+        {
+            // ..
+
+            /**
+             * @EmbedMany(
+             *   discriminatorMap={
+             *     "download"="DownloadTask",
+             *     "build"="BuildTask"
+             *   },
+             *   defaultDiscriminatorValue="download"
+             * )
+             */
+            private $tasks = array();
+
+            // ...
+        }
+
+    .. code-block:: xml
+
+        <embed-many fieldName="tasks">
+            <discriminator-map>
+                <discriminator-mapping value="download" class="DownloadTask" />
+                <discriminator-mapping value="build" class="BuildTask" />
+            </discriminator-map>
+            <default-discriminator-value value="download" />
+        </embed-many>
+
+    .. code-block:: yaml
+
+        embedMany:
+          tasks:
+            discriminatorMap:
+              download: DownloadTask
+              build: BuildTask
+            defaultDiscriminatorValue: download
 
 Cascading Operations
 --------------------

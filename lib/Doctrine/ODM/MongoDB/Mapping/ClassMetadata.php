@@ -131,6 +131,7 @@ class ClassMetadata extends ClassMetadataInfo
             $serialized[] = 'discriminatorField';
             $serialized[] = 'discriminatorValue';
             $serialized[] = 'discriminatorMap';
+            $serialized[] = 'defaultDiscriminatorValue';
             $serialized[] = 'parentClasses';
             $serialized[] = 'subClasses';
         }
@@ -162,6 +163,12 @@ class ClassMetadata extends ClassMetadataInfo
 
         if ($this->distance) {
             $serialized[] = 'distance';
+        }
+
+        if ($this->collectionCapped) {
+            $serialized[] = 'collectionCapped';
+            $serialized[] = 'collectionSize';
+            $serialized[] = 'collectionMax';
         }
 
         return $serialized;

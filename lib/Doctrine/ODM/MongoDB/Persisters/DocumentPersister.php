@@ -20,9 +20,10 @@
 namespace Doctrine\ODM\MongoDB\Persisters;
 
 use Doctrine\Common\EventManager;
-use Doctrine\MongoDB\Cursor as BaseCursor;
+use Doctrine\MongoDB\CursorInterface;
 use Doctrine\ODM\MongoDB\Cursor;
 use Doctrine\ODM\MongoDB\DocumentManager;
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 use Doctrine\ODM\MongoDB\Hydrator\HydratorFactory;
 use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\LockMode;
@@ -72,13 +73,6 @@ class DocumentPersister
     private $uow;
 
     /**
-     * The Hydrator instance
-     *
-     * @var HydratorInterface
-     */
-    private $hydrator;
-
-    /**
      * The ClassMetadata instance for the document type being persisted.
      *
      * @var ClassMetadata
@@ -114,6 +108,13 @@ class DocumentPersister
     private $cm;
 
     /**
+     * The CollectionPersister instance.
+     *
+     * @var CollectionPersister
+     */
+    private $cp;
+
+    /**
      * Initializes a new DocumentPersister instance.
      *
      * @param PersistenceBuilder $pb
@@ -133,6 +134,7 @@ class DocumentPersister
         $this->hydratorFactory = $hydratorFactory;
         $this->class = $class;
         $this->collection = $dm->getDocumentCollection($class->name);
+        $this->cp = $this->uow->getCollectionPersister();
     }
 
     /**
@@ -225,7 +227,7 @@ class DocumentPersister
             if ($this->class->isVersioned) {
                 $versionMapping = $this->class->fieldMappings[$this->class->versionField];
                 if ($versionMapping['type'] === 'int') {
-                    $nextVersion = $this->class->reflFields[$this->class->versionField]->getValue($document);
+                    $nextVersion = max(1, (int) $this->class->reflFields[$this->class->versionField]->getValue($document));
                     $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
                 } elseif ($versionMapping['type'] === 'date') {
                     $nextVersionDateTime = new \DateTime();
@@ -245,6 +247,14 @@ class DocumentPersister
                 $this->queuedInserts = array();
                 throw $e;
             }
+        }
+
+        /* All collections except for ones using addToSet have already been
+         * saved. We have left these to be handled separately to avoid checking
+         * collection for uniqueness on PHP side.
+         */
+        foreach ($this->queuedInserts as $document) {
+            $this->handleCollections($document, $options);
         }
 
         $this->queuedInserts = array();
@@ -268,8 +278,23 @@ class DocumentPersister
         foreach ($this->queuedUpserts as $oid => $document) {
             $data = $this->pb->prepareUpsertData($document);
 
+            // Set the initial version for each upsert
+            if ($this->class->isVersioned) {
+                $versionMapping = $this->class->fieldMappings[$this->class->versionField];
+                if ($versionMapping['type'] === 'int') {
+                    $nextVersion = max(1, (int) $this->class->reflFields[$this->class->versionField]->getValue($document));
+                    $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
+                } elseif ($versionMapping['type'] === 'date') {
+                    $nextVersionDateTime = new \DateTime();
+                    $nextVersion = new \MongoDate($nextVersionDateTime->getTimestamp());
+                    $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersionDateTime);
+                }
+                $data['$set'][$versionMapping['name']] = $nextVersion;
+            }
+            
             try {
                 $this->executeUpsert($data, $options);
+                $this->handleCollections($document, $options);
                 unset($this->queuedUpserts[$oid]);
             } catch (\MongoException $e) {
                 unset($this->queuedUpserts[$oid]);
@@ -337,30 +362,29 @@ class DocumentPersister
         $id = $this->uow->getDocumentIdentifier($document);
         $update = $this->pb->prepareUpdateData($document);
 
-        if ( ! empty($update)) {
+        $id = $this->class->getDatabaseIdentifierValue($id);
+        $query = array('_id' => $id);
 
-            $id = $this->class->getDatabaseIdentifierValue($id);
-            $query = array('_id' => $id);
-
-            // Include versioning logic to set the new version value in the database
-            // and to ensure the version has not changed since this document object instance
-            // was fetched from the database
-            if ($this->class->isVersioned) {
-                $versionMapping = $this->class->fieldMappings[$this->class->versionField];
-                $currentVersion = $this->class->reflFields[$this->class->versionField]->getValue($document);
-                if ($versionMapping['type'] === 'int') {
-                    $nextVersion = $currentVersion + 1;
-                    $update['$inc'][$versionMapping['name']] = 1;
-                    $query[$versionMapping['name']] = $currentVersion;
-                    $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
-                } elseif ($versionMapping['type'] === 'date') {
-                    $nextVersion = new \DateTime();
-                    $update['$set'][$versionMapping['name']] = new \MongoDate($nextVersion->getTimestamp());
-                    $query[$versionMapping['name']] = new \MongoDate($currentVersion->getTimestamp());
-                    $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
-                }
+        // Include versioning logic to set the new version value in the database
+        // and to ensure the version has not changed since this document object instance
+        // was fetched from the database
+        if ($this->class->isVersioned) {
+            $versionMapping = $this->class->fieldMappings[$this->class->versionField];
+            $currentVersion = $this->class->reflFields[$this->class->versionField]->getValue($document);
+            if ($versionMapping['type'] === 'int') {
+                $nextVersion = $currentVersion + 1;
+                $update['$inc'][$versionMapping['name']] = 1;
+                $query[$versionMapping['name']] = $currentVersion;
+                $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
+            } elseif ($versionMapping['type'] === 'date') {
+                $nextVersion = new \DateTime();
+                $update['$set'][$versionMapping['name']] = new \MongoDate($nextVersion->getTimestamp());
+                $query[$versionMapping['name']] = new \MongoDate($currentVersion->getTimestamp());
+                $this->class->reflFields[$this->class->versionField]->setValue($document, $nextVersion);
             }
+        }
 
+        if ( ! empty($update)) {
             // Include locking logic so that if the document object in memory is currently
             // locked then it will remove it, otherwise it ensures the document is not locked.
             if ($this->class->isLockable) {
@@ -373,13 +397,14 @@ class DocumentPersister
                 }
             }
 
-            unset($update['$set']['_id']);
             $result = $this->collection->update($query, $update, $options);
 
             if (($this->class->isVersioned || $this->class->isLockable) && ! $result['n']) {
                 throw LockException::lockFailed($document);
             }
         }
+
+        $this->handleCollections($document, $options);
     }
 
     /**
@@ -481,22 +506,15 @@ class DocumentPersister
         $baseCursor = $this->collection->find($criteria);
         $cursor = $this->wrapCursor($baseCursor);
 
-        /* The wrapped cursor may be used if the ODM cursor becomes wrapped with
-         * an EagerCursor, so we should apply the same sort, limit, and skip
-         * options to both cursors.
-         */
         if (null !== $sort) {
-            $baseCursor->sort($this->prepareSortOrProjection($sort));
             $cursor->sort($sort);
         }
 
         if (null !== $limit) {
-            $baseCursor->limit($limit);
             $cursor->limit($limit);
         }
 
         if (null !== $skip) {
-            $baseCursor->skip($skip);
             $cursor->skip($skip);
         }
 
@@ -506,10 +524,10 @@ class DocumentPersister
     /**
      * Wraps the supplied base cursor in the corresponding ODM class.
      *
-     * @param BaseCursor $cursor
+     * @param CursorInterface $baseCursor
      * @return Cursor
      */
-    private function wrapCursor(BaseCursor $baseCursor)
+    private function wrapCursor(CursorInterface $baseCursor)
     {
         return new Cursor($baseCursor, $this->dm->getUnitOfWork(), $this->class);
     }
@@ -575,7 +593,7 @@ class DocumentPersister
             $this->uow->registerManaged($document, $id, $result);
         }
 
-        return $this->uow->getOrCreateDocument($this->class->name, $result, $hints);
+        return $this->uow->getOrCreateDocument($this->class->name, $result, $hints, $document);
     }
 
     /**
@@ -616,14 +634,15 @@ class DocumentPersister
                 $embeddedMetadata = $this->dm->getClassMetadata($className);
                 $embeddedDocumentObject = $embeddedMetadata->newInstance();
 
+                $this->uow->setParentAssociation($embeddedDocumentObject, $mapping, $owner, $mapping['name'] . '.' . $key);
+
                 $data = $this->hydratorFactory->hydrate($embeddedDocumentObject, $embeddedDocument);
                 $id = $embeddedMetadata->identifier && isset($data[$embeddedMetadata->identifier])
                     ? $data[$embeddedMetadata->identifier]
                     : null;
 
                 $this->uow->registerManaged($embeddedDocumentObject, $id, $data);
-                $this->uow->setParentAssociation($embeddedDocumentObject, $mapping, $owner, $mapping['name'] . '.' . $key);
-                if ($mapping['strategy'] === 'set') {
+                if (CollectionHelper::isHash($mapping['strategy'])) {
                     $collection->set($key, $embeddedDocumentObject);
                 } else {
                     $collection->add($embeddedDocumentObject);
@@ -655,7 +674,7 @@ class DocumentPersister
 
             // no custom sort so add the references right now in the order they are embedded
             if ( ! $sorted) {
-                if ($mapping['strategy'] === 'set') {
+                if (CollectionHelper::isHash($mapping['strategy'])) {
                     $collection->set($key, $reference);
                 } else {
                     $collection->add($reference);
@@ -768,7 +787,7 @@ class DocumentPersister
     /**
      * @param PersistentCollection $collection
      *
-     * @return Cursor
+     * @return CursorInterface
      */
     public function createReferenceManyWithRepositoryMethodCursor(PersistentCollection $collection)
     {
@@ -776,6 +795,10 @@ class DocumentPersister
         $mapping = $collection->getMapping();
         $cursor = $this->dm->getRepository($mapping['targetDocument'])
             ->$mapping['repositoryMethod']($collection->getOwner());
+
+        if ( ! $cursor instanceof CursorInterface) {
+            throw new \BadMethodCallException("Expected repository method {$mapping['repositoryMethod']} to return a CursorInterface");
+        }
 
         if (isset($mapping['sort'])) {
             $cursor->sort($mapping['sort']);
@@ -1012,7 +1035,8 @@ class DocumentPersister
             return array($fieldName, $value);
         }
 
-        if ($mapping['strategy'] === 'set' && isset($e[2])) {
+        if (isset($mapping['strategy']) && CollectionHelper::isHash($mapping['strategy'])
+                && isset($e[2])) {
             $objectProperty = $e[2];
             $objectPropertyPrefix = $e[1] . '.';
             $nextObjectProperty = implode('.', array_slice($e, 3));
@@ -1200,6 +1224,32 @@ class DocumentPersister
                 $discriminatorValues[] = $key;
             }
         }
+
+        // If a defaultDiscriminatorValue is set and it is among the discriminators being queries, add NULL to the list
+        if ($metadata->defaultDiscriminatorValue && (array_search($metadata->defaultDiscriminatorValue, $discriminatorValues)) !== false) {
+            $discriminatorValues[] = null;
+        }
+
         return $discriminatorValues;
+    }
+
+    private function handleCollections($document, $options)
+    {
+        // Collection deletions (deletions of complete collections)
+        foreach ($this->uow->getScheduledCollections($document) as $coll) {
+            if ($this->uow->isCollectionScheduledForDeletion($coll)) {
+                $this->cp->delete($coll, $options);
+            }
+        }
+        // Collection updates (deleteRows, updateRows, insertRows)
+        foreach ($this->uow->getScheduledCollections($document) as $coll) {
+            if ($this->uow->isCollectionScheduledForUpdate($coll)) {
+                $this->cp->update($coll, $options);
+            }
+        }
+        // Take new snapshots from visited collections
+        foreach ($this->uow->getVisitedCollections($document) as $coll) {
+            $coll->takeSnapshot();
+        }
     }
 }

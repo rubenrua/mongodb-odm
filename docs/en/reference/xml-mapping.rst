@@ -25,6 +25,13 @@ trunk.
     
     </doctrine-mongo-mapping>
 
+.. note::
+
+    If you do not want to use latest XML Schema document please use link like
+    `http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping-1.0.0-BETA12.xsd <http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping-1.0.0-BETA12.xsd>`_.
+    You can change ``1.0.0-BETA12`` part of the URL to 
+    `any other ODM version <https://github.com/doctrine/mongodb-odm/releases>`_.
+
 The XML mapping document of a class is loaded on-demand the first
 time it is requested and subsequently stored in the metadata cache.
 In order to work, this requires certain conventions:
@@ -62,6 +69,28 @@ of the constructor, like this:
     // $config instanceof Doctrine\ODM\MongoDB\Configuration
     $driver = new XmlDriver(array('/path/to/files'));
     $config->setMetadataDriverImpl($driver);
+
+Simplified XML Driver
+~~~~~~~~~~~~~~~~~~~~~
+
+The Symfony project sponsored a driver that simplifies usage of the XML Driver.
+The changes between the original driver are:
+
+1. File Extension is .mongodb-odm.xml
+2. Filenames are shortened, "MyProject\Documents\User" will become User.mongodb-odm.xml
+3. You can add a global file and add multiple documents in this file.
+
+Configuration of this client works a little bit different:
+
+.. code-block:: php
+
+    <?php
+    $namespaces = array(
+        'MyProject\Documents' => '/path/to/files1',
+        'OtherProject\Documents' => '/path/to/files2'
+    );
+    $driver = new \Doctrine\ODM\MongoDB\Mapping\Driver\SimplifiedXmlDriver($namespaces);
+    $driver->setGlobalBasename('global'); // global.mongodb-odm.xml
 
 Example
 -------

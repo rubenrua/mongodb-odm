@@ -170,7 +170,7 @@ Here is a quick overview of the built-in mapping types:
 -  ``int``
 -  ``key``
 -  ``object_id``
--  ``raw_type``
+-  ``raw``
 -  ``string``
 -  ``timestamp``
 
@@ -198,6 +198,7 @@ This list explains some of the less obvious mapping types:
 -  ``id``: string to MongoId by default, but other formats are possible
 -  ``timestamp``: string to MongoTimestamp
 -  ``increment``: integer in both PHP and MongoDB
+-  ``raw``: any type
 
 .. note::
     
@@ -299,7 +300,7 @@ Here is how you can configure the strategy for the different configuration forma
                                 xsi:schemaLocation="http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping
                                                     http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping.xsd">
     
-            <document name="MyPersistentClass" customId="true">
+            <document name="MyPersistentClass">
                 <field name="id" id="true" strategy="NONE" />
             </document>
         </doctrine-mongo-mapping>
@@ -307,7 +308,6 @@ Here is how you can configure the strategy for the different configuration forma
     .. code-block:: yaml
 
         MyPersistentClass:
-          customId: true
           fields:
             id:
               id: true
@@ -335,6 +335,57 @@ Now you can retrieve the document later:
     //...
 
     $document = $dm->find('MyPersistentClass', 'my_unique_identifier');
+
+You can define your own ID generator by extending the
+``Doctrine\ODM\MongoDB\Id\AbstractIdGenerator`` class and specifying the class
+as an option for the ``CUSTOM`` strategy:
+
+.. configuration-block::
+
+    .. code-block:: php
+
+        <?php
+
+        /** Document */
+        class MyPersistentClass
+        {
+            /** @Id(strategy="CUSTOM", type="string", options={"class"="Vendor\Specific\Generator"}) */
+            private $id;
+
+            public function setId($id)
+            {
+                $this->id = $id;
+            }
+
+            //...
+        }
+
+    .. code-block:: xml
+
+        <doctrine-mongo-mapping xmlns="http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping"
+                                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                xsi:schemaLocation="http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping
+                                                    http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping.xsd">
+
+            <document name="MyPersistentClass">
+                <field name="id" id="true" strategy="CUSTOM" type="string">
+                    <id-generator-option name="class" value="Vendor\Specific\Generator" />
+                </field>
+            </document>
+        </doctrine-mongo-mapping>
+
+    .. code-block:: yaml
+
+        MyPersistentClass:
+          fields:
+            id:
+              id: true
+              strategy: CUSTOM
+              type: string
+              options:
+                class: Vendor\Specific\Generator
+
+
 
 Fields
 ~~~~~~

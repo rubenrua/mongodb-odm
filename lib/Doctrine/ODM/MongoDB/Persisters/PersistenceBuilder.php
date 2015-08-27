@@ -23,6 +23,7 @@ use Doctrine\ODM\MongoDB\Mapping\ClassMetadata;
 use Doctrine\ODM\MongoDB\PersistentCollection;
 use Doctrine\ODM\MongoDB\Types\Type;
 use Doctrine\ODM\MongoDB\UnitOfWork;
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 
 /**
  * PersistenceBuilder builds the queries used by the persisters to update and insert
@@ -74,39 +75,38 @@ class PersistenceBuilder
         $insertData = array();
         foreach ($class->fieldMappings as $mapping) {
 
-            // @ReferenceMany and @EmbedMany are inserted later
-            if ($mapping['type'] === ClassMetadata::MANY) {
-                continue;
-            }
-
             $new = isset($changeset[$mapping['fieldName']][1]) ? $changeset[$mapping['fieldName']][1] : null;
 
-            // Don't store null values unless nullable === true
-            if ($new === null && $mapping['nullable'] === false) {
+            if ($new === null && $mapping['nullable']) {
+                $insertData[$mapping['name']] = null;
+            }
+
+            /* Nothing more to do for null values, since we're either storing
+             * them (if nullable was true) or not.
+             */
+            if ($new === null) {
                 continue;
             }
 
-            $value = null;
-            if ($new !== null) {
-                // @Field, @String, @Date, etc.
-                if ( ! isset($mapping['association'])) {
-                    $value = Type::getType($mapping['type'])->convertToDatabaseValue($new);
+            // @Field, @String, @Date, etc.
+            if ( ! isset($mapping['association'])) {
+                $insertData[$mapping['name']] = Type::getType($mapping['type'])->convertToDatabaseValue($new);
 
-                // @ReferenceOne
-                } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_ONE) {
-                    if ($mapping['isInverseSide']) {
-                        continue;
-                    }
+            // @ReferenceOne
+            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_ONE && $mapping['isOwningSide']) {
+                $insertData[$mapping['name']] = $this->prepareReferencedDocumentValue($mapping, $new);
 
-                    $value = $this->prepareReferencedDocumentValue($mapping, $new);
+            // @EmbedOne
+            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_ONE) {
+                $insertData[$mapping['name']] = $this->prepareEmbeddedDocumentValue($mapping, $new);
 
-                // @EmbedOne
-                } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_ONE) {
-                    $value = $this->prepareEmbeddedDocumentValue($mapping, $new);
-                }
+            // @ReferenceMany, @EmbedMany
+            // We're excluding collections using addToSet since there is a risk
+            // of duplicated entries stored in the collection
+            } elseif ($mapping['type'] === ClassMetadata::MANY && ! $mapping['isInverseSide']
+                    && $mapping['strategy'] !== 'addToSet' && ! $new->isEmpty()) {
+                $insertData[$mapping['name']] = $this->prepareAssociatedCollectionValue($new, true);
             }
-
-            $insertData[$mapping['name']] = $value;
         }
 
         // add discriminator if the class has one
@@ -183,9 +183,17 @@ class PersistenceBuilder
                     }
                 }
 
-            // @EmbedMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_MANY) {
-                if (null !== $new) {
+            // @ReferenceMany, @EmbedMany
+            } elseif (isset($mapping['association']) && $mapping['type'] === 'many' && $new) {
+                if (CollectionHelper::isAtomic($mapping['strategy']) && $this->uow->isCollectionScheduledForUpdate($new)) {
+                    $updateData['$set'][$mapping['name']] = $this->prepareAssociatedCollectionValue($new, true);
+                } elseif (CollectionHelper::isAtomic($mapping['strategy']) && $this->uow->isCollectionScheduledForDeletion($new)) {
+                    $updateData['$unset'][$mapping['name']] = true;
+                    $this->uow->unscheduleCollectionDeletion($new);
+                } elseif (CollectionHelper::isAtomic($mapping['strategy']) && $this->uow->isCollectionScheduledForDeletion($old)) {
+                    $updateData['$unset'][$mapping['name']] = true;
+                    $this->uow->unscheduleCollectionDeletion($old);
+                } elseif ($mapping['association'] === ClassMetadata::EMBED_MANY) {
                     foreach ($new as $key => $embeddedDoc) {
                         if ( ! $this->uow->isScheduledForInsert($embeddedDoc)) {
                             $update = $this->prepareUpdateData($embeddedDoc);
@@ -205,11 +213,19 @@ class PersistenceBuilder
                 } else {
                     $updateData['$unset'][$mapping['name']] = true;
                 }
-
-            // @ReferenceMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_MANY) {
-                // Do nothing right now
             }
+        }
+        // collections that aren't dirty but could be subject to update are
+        // excluded from change set, let's go through them now
+        foreach ($this->uow->getScheduledCollections($document) as $coll) {
+            $mapping = $coll->getMapping();
+            if (CollectionHelper::isAtomic($mapping['strategy']) && $this->uow->isCollectionScheduledForUpdate($coll)) {
+                $updateData['$set'][$mapping['name']] = $this->prepareAssociatedCollectionValue($coll, true);
+            } elseif (CollectionHelper::isAtomic($mapping['strategy']) && $this->uow->isCollectionScheduledForDeletion($coll)) {
+                $updateData['$unset'][$mapping['name']] = true;
+                $this->uow->unscheduleCollectionDeletion($coll);
+            }
+            // @ReferenceMany is handled by CollectionPersister
         }
         return $updateData;
     }
@@ -264,29 +280,19 @@ class PersistenceBuilder
                     }
                 }
 
-            // @EmbedMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::EMBED_MANY && $new) {
-                foreach ($new as $key => $embeddedDoc) {
-                    if ( ! $this->uow->isScheduledForInsert($embeddedDoc)) {
-                        $update = $this->prepareUpsertData($embeddedDoc);
-                        foreach ($update as $cmd => $values) {
-                            foreach ($values as $name => $value) {
-                                $updateData[$cmd][$mapping['name'] . '.' . $key . '.' . $name] = $value;
-                            }
-                        }
-                    }
-                }
-
             // @ReferenceOne
             } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_ONE && $mapping['isOwningSide']) {
                 if (isset($new) || $mapping['nullable'] === true) {
                     $updateData['$set'][$mapping['name']] = (is_null($new) ? null : $this->prepareReferencedDocumentValue($mapping, $new));
                 }
 
-            // @ReferenceMany
-            } elseif (isset($mapping['association']) && $mapping['association'] === ClassMetadata::REFERENCE_MANY) {
-                // Do nothing right now
+            // @ReferenceMany, @EmbedMany
+            } elseif ($mapping['type'] === ClassMetadata::MANY && ! $mapping['isInverseSide']
+                    && $new instanceof PersistentCollection && $new->isDirty()
+                    && CollectionHelper::isAtomic($mapping['strategy'])) {
+                $updateData['$set'][$mapping['name']] = $this->prepareAssociatedCollectionValue($new, true);
             }
+            // @EmbedMany and @ReferenceMany are handled by CollectionPersister
         }
 
         // add discriminator if the class has one
@@ -322,11 +328,19 @@ class PersistenceBuilder
      * returned if the document is empty, to ensure that a BSON object will be
      * stored in lieu of an array.
      *
+     * If $includeNestedCollections is true, nested collections will be included
+     * in this prepared value and the option will cascade to all embedded
+     * associations. If any nested PersistentCollections (embed or reference)
+     * within this value were previously scheduled for deletion or update, they
+     * will also be unscheduled.
+     *
      * @param array $embeddedMapping
      * @param object $embeddedDocument
+     * @param boolean $includeNestedCollections
      * @return array|object
+     * @throws \UnexpectedValueException if an unsupported associating mapping is found
      */
-    public function prepareEmbeddedDocumentValue(array $embeddedMapping, $embeddedDocument)
+    public function prepareEmbeddedDocumentValue(array $embeddedMapping, $embeddedDocument, $includeNestedCollections = false)
     {
         $embeddedDocumentValue = array();
         $class = $this->dm->getClassMetadata(get_class($embeddedDocument));
@@ -351,27 +365,19 @@ class PersistenceBuilder
 
                     case ClassMetadata::EMBED_ONE:
                     case ClassMetadata::REFERENCE_ONE:
-                        $value = $this->prepareAssociatedDocumentValue($mapping, $rawValue);
+                        // Nested collections should only be included for embedded relationships
+                        $value = $this->prepareAssociatedDocumentValue($mapping, $rawValue, $includeNestedCollections && isset($mapping['embedded']));
                         break;
 
                     case ClassMetadata::EMBED_MANY:
                     case ClassMetadata::REFERENCE_MANY:
-                        // Skip PersistentCollections already scheduled for deletion/update
-                        if ($rawValue instanceof PersistentCollection &&
-                            ($this->uow->isCollectionScheduledForDeletion($rawValue) ||
-                             $this->uow->isCollectionScheduledForUpdate($rawValue))) {
+                        // Skip PersistentCollections already scheduled for deletion
+                        if ( ! $includeNestedCollections && $rawValue instanceof PersistentCollection
+                            && $this->uow->isCollectionScheduledForDeletion($rawValue)) {
                             break;
                         }
 
-                        $pb = $this;
-                        $value = $rawValue->map(function($v) use ($pb, $mapping) {
-                            return $pb->prepareAssociatedDocumentValue($mapping, $v);
-                        })->toArray();
-
-                        // Numerical reindexing may be necessary to ensure BSON array storage
-                        if (in_array($mapping['strategy'], array('setArray', 'pushAll', 'addToSet'))) {
-                            $value = array_values($value);
-                        }
+                        $value = $this->prepareAssociatedCollectionValue($rawValue, $includeNestedCollections);
                         break;
 
                     default:
@@ -437,19 +443,49 @@ class PersistenceBuilder
      *
      * @param array $mapping
      * @param object $document
+     * @param boolean $includeNestedCollections
      * @return array|object|null
+     * @throws \InvalidArgumentException if the mapping is neither embedded nor reference
      */
-    public function prepareAssociatedDocumentValue(array $mapping, $document)
+    public function prepareAssociatedDocumentValue(array $mapping, $document, $includeNestedCollections = false)
     {
         if (isset($mapping['embedded'])) {
-            return $this->prepareEmbeddedDocumentValue($mapping, $document);
+            return $this->prepareEmbeddedDocumentValue($mapping, $document, $includeNestedCollections);
         }
 
         if (isset($mapping['reference'])) {
-            return $this->prepareReferencedDocumentValue($mapping, $document);
+            return $this->prepareReferencedDocumentValue($mapping, $document, false);
         }
 
         throw new \InvalidArgumentException('Mapping is neither embedded nor reference.');
+    }
+
+    /**
+     * Returns the collection representation to be stored and unschedules it afterwards.
+     *
+     * @param PersistentCollection $coll
+     * @param bool $includeNestedCollections
+     * @return array
+     */
+    public function prepareAssociatedCollectionValue(PersistentCollection $coll, $includeNestedCollections = false)
+    {
+        $mapping = $coll->getMapping();
+        $pb = $this;
+        $callback = isset($mapping['embedded'])
+            ? function($v) use ($pb, $mapping, $includeNestedCollections) {
+                return $pb->prepareEmbeddedDocumentValue($mapping, $v, $includeNestedCollections);
+            }
+            : function($v) use ($pb, $mapping) { return $pb->prepareReferencedDocumentValue($mapping, $v); };
+
+        $setData = $coll->map($callback)->toArray();
+        if (CollectionHelper::isList($mapping['strategy'])) {
+            $setData = array_values($setData);
+        }
+
+        $this->uow->unscheduleCollectionDeletion($coll);
+        $this->uow->unscheduleCollectionUpdate($coll);
+
+        return $setData;
     }
 
     /**

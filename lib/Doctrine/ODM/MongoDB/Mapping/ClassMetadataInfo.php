@@ -19,6 +19,7 @@
 
 namespace Doctrine\ODM\MongoDB\Mapping;
 
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\Mapping\MappingException;
 use Doctrine\ODM\MongoDB\Proxy\Proxy;
@@ -347,6 +348,14 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     public $discriminatorField;
 
     /**
+     * READ-ONLY: The default value for discriminatorField in case it's not set in the document
+     *
+     * @var string
+     * @see discriminatorField
+     */
+    public $defaultDiscriminatorValue;
+
+    /**
      * READ-ONLY: Whether this class describes the mapping of a mapped superclass.
      *
      * @var boolean
@@ -506,6 +515,10 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
      */
     public function setCustomRepositoryClass($repositoryClassName)
     {
+        if ($this->isEmbeddedDocument) {
+            return;
+        }
+        
         if ($repositoryClassName && strpos($repositoryClassName, '\\') === false && strlen($this->namespace)) {
             $repositoryClassName = $this->namespace . '\\' . $repositoryClassName;
         }
@@ -680,6 +693,29 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
                 }
             }
         }
+    }
+
+    /**
+     * Sets the default discriminator value to be used for this class
+     * Used for JOINED and SINGLE_TABLE inheritance mapping strategies if the document has no discriminator value
+     *
+     * @param string $defaultDiscriminatorValue
+     *
+     * @throws MappingException
+     */
+    public function setDefaultDiscriminatorValue($defaultDiscriminatorValue)
+    {
+        if ($defaultDiscriminatorValue === null) {
+            $this->defaultDiscriminatorValue = null;
+
+            return;
+        }
+
+        if (!array_key_exists($defaultDiscriminatorValue, $this->discriminatorMap)) {
+            throw MappingException::invalidDiscriminatorValue($defaultDiscriminatorValue, $this->name);
+        }
+
+        $this->defaultDiscriminatorValue = $defaultDiscriminatorValue;
     }
 
     /**
@@ -1034,6 +1070,9 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
         if ( ! isset($mapping['name'])) {
             $mapping['name'] = $mapping['fieldName'];
         }
+        if ($this->identifier === $mapping['name'] && empty($mapping['id'])) {
+            throw MappingException::mustNotChangeIdentifierFieldsType($this->name, $mapping['name']);
+        }
         if (isset($this->fieldMappings[$mapping['fieldName']])) {
             //throw MappingException::duplicateFieldMapping($this->name, $mapping['fieldName']);
         }
@@ -1086,26 +1125,23 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
         }
         if (isset($mapping['id']) && $mapping['id'] === true) {
             $mapping['name'] = '_id';
-            $mapping['type'] = isset($mapping['type']) ? $mapping['type'] : 'id';
             $this->identifier = $mapping['fieldName'];
             if (isset($mapping['strategy'])) {
-                $this->generatorOptions = isset($mapping['options']) ? $mapping['options'] : array();
-
-                $generatorType = constant('Doctrine\ODM\MongoDB\Mapping\ClassMetadata::GENERATOR_TYPE_' . strtoupper($mapping['strategy']));
-                if ($generatorType !== self::GENERATOR_TYPE_AUTO) {
-                    if (isset($this->generatorOptions['type'])) {
-                        $mapping['type'] = $this->generatorOptions['type'];
-                    } elseif ($generatorType === ClassMetadata::GENERATOR_TYPE_INCREMENT) {
-                        $mapping['type'] = 'int_id';
-                    } else {
-                        $mapping['type'] = 'custom_id';
-                    }
-
-                    unset($this->generatorOptions['type']);
-                }
-
-                $this->generatorType = $generatorType;
+                $this->generatorType = constant('Doctrine\ODM\MongoDB\Mapping\ClassMetadata::GENERATOR_TYPE_' . strtoupper($mapping['strategy']));
             }
+            $this->generatorOptions = isset($mapping['options']) ? $mapping['options'] : array();
+            switch ($this->generatorType) {
+                case self::GENERATOR_TYPE_AUTO:
+                    $mapping['type'] = 'id';
+                    break;
+                default:
+                    if ( ! empty($this->generatorOptions['type'])) {
+                        $mapping['type'] = $this->generatorOptions['type'];
+                    } elseif (empty($mapping['type'])) {
+                        $mapping['type'] = $this->generatorType === self::GENERATOR_TYPE_INCREMENT ? 'int_id' : 'custom_id';
+                    }
+            }
+            unset($this->generatorOptions['type']);
         }
         if ( ! isset($mapping['nullable'])) {
             $mapping['nullable'] = false;
@@ -1113,6 +1149,20 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
 
         if (isset($mapping['reference']) && ! empty($mapping['simple']) && ! isset($mapping['targetDocument'])) {
             throw MappingException::simpleReferenceRequiresTargetDocument($this->name, $mapping['fieldName']);
+        }
+
+        if (isset($mapping['reference']) && empty($mapping['targetDocument']) && empty($mapping['discriminatorMap']) &&
+                (isset($mapping['mappedBy']) || isset($mapping['inversedBy']))) {
+            throw MappingException::owningAndInverseReferencesRequireTargetDocument($this->name, $mapping['fieldName']);
+        }
+
+        if (isset($mapping['reference']) && $mapping['type'] === 'many' && ! isset($mapping['mappedBy'])
+            && ! empty($mapping['sort']) && ! CollectionHelper::usesSet($mapping['strategy'])) {
+            throw MappingException::referenceManySortMustNotBeUsedWithNonSetCollectionStrategy($this->name, $mapping['fieldName'], $mapping['strategy']);
+        }
+        
+        if ($this->isEmbeddedDocument && $mapping['type'] === 'many' && CollectionHelper::isAtomic($mapping['strategy'])) {
+            throw MappingException::atomicCollectionStrategyNotAllowed($mapping['strategy'], $this->name, $mapping['fieldName']);
         }
 
         if (isset($mapping['reference']) && $mapping['type'] === 'one') {
@@ -1239,6 +1289,26 @@ class ClassMetadataInfo implements \Doctrine\Common\Persistence\Mapping\ClassMet
     public function addInheritedFieldMapping(array $fieldMapping)
     {
         $this->fieldMappings[$fieldMapping['fieldName']] = $fieldMapping;
+
+        if (isset($fieldMapping['association'])) {
+            $this->associationMappings[$fieldMapping['fieldName']] = $fieldMapping;
+        }
+    }
+
+    /**
+     * INTERNAL:
+     * Adds an association mapping without completing/validating it.
+     * This is mainly used to add inherited association mappings to derived classes.
+     *
+     * @param array $mapping
+     *
+     * @return void
+     *
+     * @throws MappingException
+     */
+    public function addInheritedAssociationMapping(array $mapping/*, $owningClassName = null*/)
+    {
+        $this->associationMappings[$mapping['fieldName']] = $mapping;
     }
 
     /**

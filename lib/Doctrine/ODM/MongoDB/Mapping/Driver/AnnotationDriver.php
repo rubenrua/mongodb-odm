@@ -100,6 +100,8 @@ class AnnotationDriver extends AbstractAnnotationDriver
                 $class->setDiscriminatorValue($annot->value);
             } elseif ($annot instanceof ODM\ChangeTrackingPolicy) {
                 $class->setChangeTrackingPolicy(constant('Doctrine\\ODM\\MongoDB\\Mapping\\ClassMetadata::CHANGETRACKING_'.$annot->value));
+            } elseif ($annot instanceof ODM\DefaultDiscriminatorValue) {
+                $class->setDefaultDiscriminatorValue($annot->value);
             }
 
         }
@@ -123,7 +125,7 @@ class AnnotationDriver extends AbstractAnnotationDriver
         if (isset($documentAnnot->collection)) {
             $class->setCollection($documentAnnot->collection);
         }
-        if (isset($documentAnnot->repositoryClass)) {
+        if (isset($documentAnnot->repositoryClass) && !$class->isEmbeddedDocument) {
             $class->setCustomRepositoryClass($documentAnnot->repositoryClass);
         }
         if (isset($documentAnnot->indexes)) {

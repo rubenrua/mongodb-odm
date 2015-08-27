@@ -17,7 +17,7 @@ does not exist.
     /** @String @AlsoLoad("name") */
     public $fullName;
 
-The ``$fullName`` property will be lodaed from ``fullName`` if it exists, but
+The ``$fullName`` property will be loaded from ``fullName`` if it exists, but
 fall back to ``name`` if it does not exist. If multiple fall back fields are
 specified, ODM will consider them in order until the first is found.
 
@@ -126,6 +126,19 @@ value to `MongoBinData`_ with ``MongoBinData::UUID_RFC4122`` sub-type.
     RFC 4122 UUIDs must be 16 bytes. The PHP driver will throw an exception if
     the binary data's size is invalid.
 
+@Bool
+--------
+
+Alias of `@Field`_, with "type" attribute set to "bool". Internally it uses
+exactly same logic as `@Boolean`_ annotation and "boolean" type.
+
+.. code-block:: php
+
+    <?php
+
+    /** @Bool */
+    private $active;
+
 @Boolean
 --------
 
@@ -164,6 +177,29 @@ in MongoDB. The property will be a DateTime when loaded from the database.
 
     /** @Date */
     private $createdAt;
+
+@DefaultDiscriminatorValue
+--------------------------
+
+This annotation can be used when using `@DiscriminatorField`_. It will be used
+as a fallback value if a document has no discriminator field set. This must
+correspond to a value from the configured discriminator map.
+
+.. code-block:: php
+
+    <?php
+
+    /**
+     * @Document
+     * @InheritanceType("SINGLE_COLLECTION")
+     * @DiscriminatorField("type")
+     * @DiscriminatorMap({"person" = "Person", "employee" = "Employee"})
+     * @DefaultDiscriminatorValue("person")
+     */
+    class Person
+    {
+        // ...
+    }
 
 @DiscriminatorField
 -------------------
@@ -331,6 +367,9 @@ Optional attributes:
 -
     discriminatorMap - Map of discriminator values to class names.
 -
+    defaultDiscriminatorValue - A default value for discriminatorField if no value
+    has been set in the embedded document.
+-
     strategy - The strategy used to persist changes to the collection. Possible
     values are ``addToSet``, ``pushAll``, ``set``, and ``setArray``. ``pushAll``
     is the default. See :ref:`collection_strategies` for more information.
@@ -346,7 +385,8 @@ Optional attributes:
      *     discriminatorMap={
      *         "book"="Documents\BookTag",
      *         "song"="Documents\SongTag"
-     *     }
+     *     },
+     *     defaultDiscriminatorValue="book"
      * )
      */
     private $tags = array();
@@ -382,7 +422,8 @@ Optional attributes:
 -
     discriminatorMap - Map of discriminator values to class names.
 -
-    strategy - The strategy to use to persist the reference. Possible values are ``set`` and ``pushAll``; ``pushAll`` is the default.
+    defaultDiscriminatorValue - A default value for discriminatorField if no value
+    has been set in the embedded document.
 
 .. code-block:: php
 
@@ -390,15 +431,15 @@ Optional attributes:
 
     /**
      * @EmbedOne(
-     *     strategy="set",
      *     discriminatorField="type",
      *     discriminatorMap={
-     *         "book"="Documents\BookTag",
-     *         "song"="Documents\SongTag"
-     *     }
+     *         "user"="Documents\User",
+     *         "author"="Documents\Author"
+     *     },
+     *     defaultDiscriminatorValue="user"
      * )
      */
-    private $tags = array();
+    private $creator;
 
 Depending on the embedded document's class, a value of ``user`` or ``author``
 will be stored in the ``type`` field and used to reconstruct the proper class
@@ -745,6 +786,26 @@ Examples:
 
 Alias of `@Field`_, with "type" attribute set to "int".
 
+.. code-block:: php
+
+    <?php
+
+    /** @Int */
+    private $columns;
+
+@Integer
+--------
+
+Alias of `@Field`_, with "type" attribute set to "integer". Internally it uses
+exactly same logic as `@Int`_ annotation and "int" type.
+
+.. code-block:: php
+
+    <?php
+
+    /** @Integer */
+    private $columns;
+
 @Key
 ----
 
@@ -1036,6 +1097,9 @@ Optional attributes:
 -
     discriminatorMap - Map of discriminator values to class names.
 -
+    defaultDiscriminatorValue - A default value for discriminatorField if no value
+    has been set in the embedded document.
+-
     inversedBy - The field name of the inverse side. Only allowed on owning side.
 -
     mappedBy - The field name of the owning side. Only allowed on the inverse side.
@@ -1068,7 +1132,8 @@ Optional attributes:
      *     discriminatorMap={
      *         "book"="Documents\BookItem",
      *         "song"="Documents\SongItem"
-     *     }
+     *     },
+     *     defaultDiscriminatorValue="book"
      * )
      */
     private $cart;
@@ -1096,6 +1161,9 @@ Optional attributes:
 -
     discriminatorMap - Map of discriminator values to class names.
 -
+    defaultDiscriminatorValue - A default value for discriminatorField if no value
+    has been set in the embedded document.
+-
     inversedBy - The field name of the inverse side. Only allowed on owning side.
 -
     mappedBy - The field name of the owning side. Only allowed on the inverse side.
@@ -1122,7 +1190,8 @@ Optional attributes:
      *     discriminatorMap={
      *         "book"="Documents\BookItem",
      *         "song"="Documents\SongItem"
-     *     }
+     *     },
+     *     defaultDiscriminatorValue="book"
      * )
      */
     private $cart;
@@ -1163,6 +1232,8 @@ Alias of `@Index`_, with the ``unique`` option set by default.
     /** @String @UniqueIndex */
     private $email;
 
+.. _annotations_reference_version:
+
 @Version
 --------
 
@@ -1176,6 +1247,14 @@ is used for pessimistic and optimistic locking. This is only compatible with
 
     /** @Int @Version */
     private $version;
+
+By default, Doctrine ODM processes updates :ref:`embed-many <embed_many>` and
+:ref:`reference-many <reference_many>` collections in separate write operations,
+which do not bump the document version. Users employing document versioning are
+encouraged to use the :ref:`atomicSet <atomic_set>` or
+:ref:`atomicSetArray <atomic_set_array>` strategies for such collections, which
+will ensure that collections are updated in the same write operation as the
+versioned document.
 
 .. _BSON specification: http://bsonspec.org/spec.html
 .. _DBRef: http://docs.mongodb.org/manual/reference/database-references/#dbrefs

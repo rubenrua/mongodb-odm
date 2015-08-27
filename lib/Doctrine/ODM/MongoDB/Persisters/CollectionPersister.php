@@ -20,10 +20,11 @@
 namespace Doctrine\ODM\MongoDB\Persisters;
 
 use Doctrine\ODM\MongoDB\DocumentManager;
-use Doctrine\ODM\MongoDB\Mapping\ClassMetadata;
+use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\PersistentCollection;
 use Doctrine\ODM\MongoDB\Persisters\PersistenceBuilder;
 use Doctrine\ODM\MongoDB\UnitOfWork;
+use Doctrine\ODM\MongoDB\Utility\CollectionHelper;
 
 /**
  * The CollectionPersister is responsible for persisting collections of embedded
@@ -82,6 +83,9 @@ class CollectionPersister
         if ($mapping['isInverseSide']) {
             return; // ignore inverse side
         }
+        if (CollectionHelper::isAtomic($mapping['strategy'])) {
+            throw new \UnexpectedValueException($mapping['strategy'] . ' delete collection strategy should have been handled by DocumentPersister. Please report a bug in issue tracker');
+        }
         list($propertyPath, $parent) = $this->getPathAndParent($coll);
         $query = array('$unset' => array($propertyPath => true));
         $this->executeQuery($parent, $query, $options);
@@ -103,9 +107,12 @@ class CollectionPersister
         }
 
         switch ($mapping['strategy']) {
+            case 'atomicSet':
+            case 'atomicSetArray':
+                throw new \UnexpectedValueException($mapping['strategy'] . ' update collection strategy should have been handled by DocumentPersister. Please report a bug in issue tracker');
+            
             case 'set':
             case 'setArray':
-                $coll->initialize();
                 $this->setCollection($coll, $options);
                 break;
 
@@ -134,23 +141,11 @@ class CollectionPersister
      */
     private function setCollection(PersistentCollection $coll, array $options)
     {
-        $mapping = $coll->getMapping();
         list($propertyPath, $parent) = $this->getPathAndParent($coll);
-
-        $pb = $this->pb;
-
-        $callback = isset($mapping['embedded'])
-            ? function($v) use ($pb, $mapping) { return $pb->prepareEmbeddedDocumentValue($mapping, $v); }
-            : function($v) use ($pb, $mapping) { return $pb->prepareReferencedDocumentValue($mapping, $v); };
-
-        $setData = $coll->map($callback)->toArray();
-
-        if ($mapping['strategy'] === 'setArray') {
-            $setData = array_values($setData);
-        }
-
+        $coll->initialize();
+        $mapping = $coll->getMapping();
+        $setData = $this->pb->prepareAssociatedCollectionValue($coll, CollectionHelper::usesSet($mapping['strategy']));
         $query = array('$set' => array($propertyPath => $setData));
-
         $this->executeQuery($parent, $query, $options);
     }
 
@@ -218,25 +213,13 @@ class CollectionPersister
 
         $value = array_values(array_map($callback, $insertDiff));
 
-        if ($mapping['strategy'] !== 'pushAll') {
+        if ($mapping['strategy'] === 'addToSet') {
             $value = array('$each' => $value);
         }
 
         $query = array('$' . $mapping['strategy'] => array($propertyPath => $value));
 
         $this->executeQuery($parent, $query, $options);
-    }
-
-    /**
-     * Gets the document database identifier value for the given document.
-     *
-     * @param object $document
-     * @param ClassMetadata $class
-     * @return mixed $id
-     */
-    private function getDocumentId($document, ClassMetadata $class)
-    {
-        return $class->getDatabaseIdentifierValue($this->uow->getDocumentIdentifier($document));
     }
 
     /**
@@ -278,15 +261,22 @@ class CollectionPersister
      * Executes a query updating the given document.
      *
      * @param object $document
-     * @param array $query
+     * @param array $newObj
      * @param array $options
      */
-    private function executeQuery($document, array $query, array $options)
+    private function executeQuery($document, array $newObj, array $options)
     {
         $className = get_class($document);
         $class = $this->dm->getClassMetadata($className);
         $id = $class->getDatabaseIdentifierValue($this->uow->getDocumentIdentifier($document));
+        $query = array('_id' => $id);
+        if ($class->isVersioned) {
+            $query[$class->versionField] = $class->reflFields[$class->versionField]->getValue($document);
+        }
         $collection = $this->dm->getDocumentCollection($className);
-        $collection->update(array('_id' => $id), $query, $options);
+        $result = $collection->update($query, $newObj, $options);
+        if (($class->isVersioned) && ! $result['n']) {
+            throw LockException::lockFailed($document);
+        }
     }
 }

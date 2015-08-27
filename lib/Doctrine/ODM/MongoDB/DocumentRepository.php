@@ -138,9 +138,9 @@ class DocumentRepository implements ObjectRepository, Selectable
             if (!$this->class->isVersioned) {
                 throw LockException::notVersioned($this->documentName);
             }
-            $document = $this->getDocumentPersister()->load($criteria);
-
-            $this->uow->lock($document, $lockMode, $lockVersion);
+            if ($document = $this->getDocumentPersister()->load($criteria)) {
+                $this->uow->lock($document, $lockMode, $lockVersion);
+            }
 
             return $document;
         }
@@ -286,7 +286,7 @@ class DocumentRepository implements ObjectRepository, Selectable
         }
 
         // @TODO: wrap around a specialized Collection for efficient count on large collections
-        return new ArrayCollection($queryBuilder->getQuery()->execute()->toArray());
+        return new ArrayCollection($queryBuilder->getQuery()->execute()->toArray(false));
     }
 
     protected function getDocumentPersister()
